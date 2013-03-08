@@ -1,0 +1,42 @@
+HOWTO create maven archetype
+============================
+
+== Introduction ==
+
+Read:
+- https://community.jboss.org/wiki/MavenArchetypeCreationGuidelines[Maven archetype creation guidelines] from JBoss
+
+
+== Tips ==
+
+1. Use interactive mode to define new properties:
+[source,sh shell]
+-----------------
+mvn -X clean archetype:create-from-project -Dinteractive=true
+-----------------
+
+If you get error message like 'maven-archetype-plugin:2.2:create-from-project (default-cli) on project mdb-parent: character 27 is not allowed in output'
+make sure you don't use backspace and delete when entering properties in interactive mode.
+
+
+2. Use __some-property-defined-in-archetype-metadata__.java to name source files
+
+3. How to get maven archetype to generate empty directories?
+ - http://marekdec.wordpress.com/2010/01/25/how-to-get-maven-archetype-to-generate-empty-directories/[How to get maven archetype to generate empty directories?]
+ - see packageInPathFormat variable
+
+4. sample projects to lookup:
+ - http://code.google.com/p/open-archetypes/source/browse/multi-javaee5-archetype
+
+5. http://blog.inflinx.com/2010/04/16/creating-maven-archetypes-spring-mvc-example/[Creating Maven Archetypes – Spring MVC Example]
+
+6. http://rajeshpg.com/blog/2013/01/creating-custom-maven-archetype/[Creating Custom Maven Archetype] - liftweb, Scala 
+
+7. http://maven.apache.org/guides/mini/guide-using-modello.html[Guide to using Modello]
+
+8. http://code.google.com/p/jianwikis/wiki/HowToCreateMavenArchetypeFromProject[HowToCreateMavenArchetypeFromProject]
+
+9. http://stackoverflow.com/questions/8457013/maven-archetype-installation[Maven Archetype Installation]
+  - mvn install archetype:update-local-catalog
+
+10. http://www.imixs.org/jee/archetype/build.html[Imixs Building an Archetype]

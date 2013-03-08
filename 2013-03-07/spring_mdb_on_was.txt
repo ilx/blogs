@@ -1,0 +1,31 @@
+MDB with Spring on Websphere (8.5)
+==================================
+
+== Introduction ==
+
+Usually, I would just fire up DefaultMessageListenerContainer connect it to the taskexecutor baked by WorkManager and stopped worrying.
+This time I decided to create MDB that will utilize Spring framework and run on WebSphere 8. 
+Development environment: eclipse, maven, websphere 8.5, spring 3.2.1.
+
+
+Let's see how that went.
+
+
+- I created maven parent project:  mdb-parent
+-- add following property to the parent pom:
+[source,xml]
+------------
+  <properties>
+  	<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+------------
+
+-- under parent project I create 2 submodules: 
+--- mdb-web
+---- create empty web.xml so that m2e configures project nature
+
+
+--- mdb-ear
+---- create empty application.xml so that m2e configures project nature
+
+

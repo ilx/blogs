@@ -1,0 +1,14 @@
+Debug program that uses jline in eclipse
+========================================
+
+Enable debug mode for jline:
+
+[source,sh]
+--------
+-Djline.terminal=jline.UnsupportedTerminal
+--------
+
+Install ansiconsole plugin http://www.mihai-nita.net/eclipse/[ANSI in Eclipse Console]
+
+
+

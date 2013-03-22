@@ -1,0 +1,100 @@
+Spring profiles on WebSphere Application Server (WAS)
+=====================================================
+
+== Introduction ==
+
+Almost every project needs to support different kind of profiles. 
+Usually it's local development environment profile (DEV), test environment profile (TEST) and production environment profile (PROD).
+
+Since version 3 in spring we have support for different kind of profiles like this when using spring XML configuration:
+
+[source,xml]
+----------------
+<beans profile="TEST">
+    <import resource="database_TEST.xml" />
+</beans>
+<beans profile="PROD">
+    <import resource="database_PROD.xml" />
+</beans>
+----------------
+
+How to activate those profiles? The answer is simple: create your own ApplicationContextInitializer.
+
+== Application specific ApplicationContextInitializer ==
+
+Ideally we should be able to put definition of current profile somewhere in the JNDI. 
+For example we could define environment entry in the web.xml:
+
+[source,xml]
+--------------
+	<env-entry>
+		<env-entry-name>ENVIRONMENT</env-entry-name>
+		<env-entry-type>java.lang.String</env-entry-type>
+		<env-entry-value>PROD</env-entry-value>
+	</env-entry>
+--------------
+
+then we could activate spring profile with following class:
+
+[source,java]
+-------------
+public class EnvironmentAwareApplicationContextInitializer implements
+		ApplicationContextInitializer<ConfigurableWebApplicationContext> {
+
+	@Override
+	public void initialize(final ConfigurableWebApplicationContext applicationContext) {
+		ConfigurableEnvironment environment = applicationContext.getEnvironment();
+		String env = environment.getProperty("ENVIRONMENT");
+		if (null != env) {
+			environment.addActiveProfile(env);
+		}
+	}
+
+}
+-------------
+
+How does the spring know that we have defined custom ApplicationContextInitializer? We tell it in web.xml:
+
+[source,xml]
+------------
+	<context-param>
+		<param-name>contextInitializerClasses</param-name>
+		<param-value>net.ilx.spring.EnvironmentAwareApplicationContextInitializer</param-value>
+	</context-param>
+------------
+
+
+== WAS specific ApplicationContextIntializer ==
+
+Previous solution is portable, but we don't wont to define environment entries for each of our applications.
+We should be able to put it into the JDNI. Fortunately, on WAS it's possible to use Name Space Bindings.
+
+- open WAS admin console
+- go to Environment -> Naming -> Name Space bindings
+- select Cell scope
+- define variable NS_SERVER_ENV with value PROD, TEST or DEV
+
+image:ns_bindings.png[Name space bindings]
+
+Ok, but how does the spring know that the value we just defined activates specific profile?
+We tell it through ApplicationContextInitializer:
+
+[source,java]
+-------------
+public class EnvironmentAwareApplicationContextInitializer implements ApplicationContextInitializer<ConfigurableWebApplicationContext> {
+
+	@Override
+	public void initialize(final ConfigurableWebApplicationContext applicationContext) {
+		ConfigurableWebEnvironment environment = (ConfigurableWebEnvironment) applicationContext.getEnvironment();
+		String ns_server_env = environment.getProperty("cell/persistent/NS_SERVER_ENV"); // <1>
+		if (null != ns_server_env) {
+			environment.addActiveProfile(ns_server_env);
+		}
+	}
+	
+}
+-------------
+[NOTE] 
+<1> The magic happens because Spring MVC adds JNDI Property Source to the Configurable environment, so lookup for "cell/persistent/NS_SERVER_ENV" works (note that we defined NS_SERVER_ENV at the cell scope! if you define it at other scope you must change the lookup).  
+
+

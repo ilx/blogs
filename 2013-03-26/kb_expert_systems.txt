@@ -1,0 +1,36 @@
+Knowledge based expert systems
+=============================
+:encoding UTF-8
+
+Watson? :)))
+
+
+
+== Links ==
+
+http://www.jblearning.com/catalog/9780763776473/[Knowledge-Based Systems]
+
+http://www.expertsystem.net/[Expert systems] - COGITO - Italy
+
+
+
+http://www.accenture.com/us-en/Pages/success-inland-revenue-authority-singapore-interactive-tax-administration-summary.aspx[Singapore—Inland Revenue Authority: Interactive Tax Administration System Using Microsoft .NET]
+http://ieeexplore.ieee.org/xpl/login.jsp?tp=&arnumber=5602143&url=http%3A%2F%2Fieeexplore.ieee.org%2Fxpls%2Fabs_all.jsp%3Farnumber%3D5602143[A study of building tax knowledge-based system: An ontological orientation — Using cases under the national tax administration of central Taiwan province, ministry of finance]
+
+http://publib.boulder.ibm.com/infocenter/classify/v8r6/index.jsp?topic=/com.ibm.classify.workbench.doc/g_WBG_Knowledge_Base_Editor_Chapter.htmp[IBM Classification Module, Version 8.6.+] - for FileNet?
+http://publib.boulder.ibm.com/infocenter/lwm/v1r0/topic/com.ibm.lwm.doc_1.0/dev_kb_ovr.html[Integrating with an existing knowledge base] - IBM Lotus Workforce Management
+
+http://www-01.ibm.com/software/ecm/content-classification/[IBM Content Classification]
+
+
+http://www.xpertrule.com/pages/case_at.htm
+
+http://stackoverflow.com/questions/9642004/are-there-open-source-expert-systems-with-reasoning-capabilities
+
+http://www.cyc.com/platform/opencyc
+
+
+Others:
+
+http://openl-tablets.sourceforge.net/
+http://www.dtrules.com

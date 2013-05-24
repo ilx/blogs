@@ -1,0 +1,22 @@
+Resolve Oracle synonyms
+=======================
+
+
+[source,sql]
+------------
+elect level, s.*, connect_by_root(s.table_name)
+from all_synonyms s
+where s.owner LIKE 'LYNXDBAPP%'
+connect by prior s.synonym_name = s.table_name and prior s.owner = s.table_owner
+start with exists (
+  select 1 from all_objects o 
+  where s.table_owner = o.owner 
+  and s.table_name = o.object_name
+  and o.object_type != 'SYNONYM'
+  and o.owner LIKE 'LYNXDBSTORE%'
+)
+;
+------------
+
+as found http://sourceforge.net/apps/trac/jooq/ticket/1563[here]
+

@@ -1,0 +1,23 @@
+<div style="color: #484848; font-family: 'Trebuchet MS', Helvetica, sans-serif">
+<h1>Resolve Oracle synonyms</h1>
+<p>
+</p>
+<a name="preamble"></a>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt>elect level<font color="#990000">,</font> s<font color="#990000">.*,</font> connect_by_root<font color="#990000">(</font>s<font color="#990000">.</font>table_name<font color="#990000">)</font>
+<b><font color="#0000FF">from</font></b> all_synonyms s
+<b><font color="#0000FF">where</font></b> s<font color="#990000">.</font>owner <b><font color="#0000FF">LIKE</font></b> <font color="#FF0000">'LYNXDBAPP%'</font>
+connect <b><font color="#0000FF">by</font></b> prior s<font color="#990000">.</font>synonym_name <font color="#990000">=</font> s<font color="#990000">.</font>table_name <b><font color="#0000FF">and</font></b> prior s<font color="#990000">.</font>owner <font color="#990000">=</font> s<font color="#990000">.</font>table_owner
+start <b><font color="#0000FF">with</font></b> <b><font color="#0000FF">exists</font></b> <font color="#990000">(</font>
+  <b><font color="#0000FF">select</font></b> <font color="#993399">1</font> <b><font color="#0000FF">from</font></b> all_objects o
+  <b><font color="#0000FF">where</font></b> s<font color="#990000">.</font>table_owner <font color="#990000">=</font> o<font color="#990000">.</font>owner
+  <b><font color="#0000FF">and</font></b> s<font color="#990000">.</font>table_name <font color="#990000">=</font> o<font color="#990000">.</font>object_name
+  <b><font color="#0000FF">and</font></b> o<font color="#990000">.</font>object_type <font color="#990000">!=</font> <font color="#FF0000">'SYNONYM'</font>
+  <b><font color="#0000FF">and</font></b> o<font color="#990000">.</font>owner <b><font color="#0000FF">LIKE</font></b> <font color="#FF0000">'LYNXDBSTORE%'</font>
+<font color="#990000">)</font>
+<font color="#990000">;</font></tt></pre></td></tr></table>
+<p>as found <a href="http://sourceforge.net/apps/trac/jooq/ticket/1563">here</a></p>
+</div>

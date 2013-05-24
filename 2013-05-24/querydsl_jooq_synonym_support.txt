@@ -1,0 +1,4 @@
+
+
+
+ * http://www.jooq.org/manual/ADVANCED/SchemaMapping/[JooQ]

@@ -1,0 +1,169 @@
+Pooling CXF clients
+============================
+
+
+[source, xml]
+-------------
+
+<description>
+<![CDATA[
+        The problem with the spring context defined is that nowhere does it associate the http-conf or anything
+        else in that context with a Bus. Thus, the config wouldn't be picked up at all.
+        The best way to do that would be to
+
+        <import resource="classpath:META-INF/cxf/cxf.xml"/>
+
+        and then likely add
+
+        <property name="bus" ref="cxf"/>
+
+        to the JaxWsProxyFactoryBean to make sure they are wired together properly.
+
+        See https://issues.apache.org/jira/browse/CXF-3621
+        See http://cxf.apache.org/docs/client-http-transport-including-ssl-support.html#ClientHTTPTransport%28includingSSLsupport%29-The{{conduit}}element
+
+        How to force SSL to use default SSL Socket Factory (for example the one provided by Websphere):
+        See http://stackoverflow.com/questions/7275063/how-to-set-up-apache-cxf-client-to-use-websphere-truststore-receiving-no-trus
+
+        How to add custom SOAP header:
+        See http://cxf.apache.org/faq.html#FAQ-HowcanIaddsoapheaderstotherequest%2Fresponse%3F
+
+        Interesting links:
+         - https://github.com/vlussenburg/websphere-cxf-extensions
+]]>
+</description>
+
+
+<import resource="classpath:META-INF/cxf/cxf.xml"/>
+
+<bean id="abstractClientWSFactory" class="org.apache.cxf.jaxws.JaxWsProxyFactoryBean" abstract="true">
+    <property name="features" ref="factoryFeatures" />
+    <property name="outInterceptors" ref="outInterceptors" />
+    <property name="inInterceptors" ref="inInterceptors" />
+    <property name="bus" ref="cxf" />
+</bean>
+
+<!-- create pools of web service clients -->
+<bean id="ClientWSFactory" parent="abstractClientWSFactory">
+        <property name="serviceClass" value="ClientInterfaceSoap" />
+        <property name="address" value="${WsUrl}" />
+</bean>
+
+<bean id="ClientWSTarget" factory-bean="ClientWSFactory" factory-method="create" scope="prototype" lazy-init="true"/>
+
+<bean id="ClientWS" class="org.springframework.aop.framework.ProxyFactoryBean">
+    <property name="targetSource">
+        <bean class="org.springframework.aop.target.CommonsPoolTargetSource">
+            <property name="targetClass" value="ClientInterfaceSoap"/>
+            <property name="targetBeanName" value="ClientWSTarget"/>
+            <property name="maxSize" value="10"/>
+            <property name="maxWait" value="14000"/>
+        </bean>
+    </property>
+</bean>
+
+
+<!-- WS client wrappers -->
+<bean id="client" class="Client">
+        <constructor-arg ref="ClientWS"  />
+</bean>
+-------------
+
+Where, ClientInterfaceSoap is client interface (soap port), and Client is actual bean that will fetch JAX-WS client instance from the pool defined by ClientWS.
+
+Something like (note that it's not working code ):
+
+[source,java]
+-------------
+@WebService(targetNamespace = "namespace", name = "ClientInterfaceSoap")
+@XmlSeeAlso({ObjectFactory.class})
+@SOAPBinding(parameterStyle = SOAPBinding.ParameterStyle.BARE)
+public interface ClientInterfaceSoap {
+
+    @WebResult(name = "GetHelloResponse", targetNamespace = "namespace", partName = "parameters")
+    @WebMethod(operationName = "GetHello", action = "namespace/GetHello")
+    public GetAccountResponse getHello(
+        @WebParam(partName = "msg", name = "GetHello", targetNamespace = "namespace")
+        String msg
+    );
+
+}
+-------------
+
+And Client is similar to:
+
+[source,java]
+-------------
+public class Client {
+
+        private static final Logger LOG = Logger.getLogger(Client.class);
+
+        private ClientInterfaceSoap port;
+
+
+        public ExactClient(final ClientInterfaceSoap port) {
+                this.port = port;
+        }
+
+
+        public String hello(String msg) {
+                // .... 
+                GetHelloResponse response = port.getHello(msg);
+
+                MethodOutput methodResult = response.getGetHelloResult();
+                Integer status = methodResult.getStatus();
+                String statusDescription = methodResult.getStatusDescription();
+                // ....
+                return statusDescription;
+        }
+        
+-------------
+
+
+Some security related stuff required by abstractClientWSFactory bean:
+
+[source,xml]
+------------
+<!-- from docs:
+        disableCNCheck Indicates whether that the hostname given in the HTTPS URL will be checked
+        against the service's Common Name (CN) given in its certificate during SOAP client requests,
+        and failing if there is a mismatch. If set to true (not recommended for production use),
+        such checks will be bypassed.
+        That will allow you, for example, to use a URL such as localhost during development.
+
+        useHttpsURLConnectionDefaultHostnameVerifier:
+        This attribute specifies if HttpsURLConnection.defaultHostnameVerifier should be used to create
+        https connections. If 'true', 'disableCNCheck' is ignored. Since 2.2.7.
+        See javadoc of org.apache.cxf.transport.https.CertificateHostnameVerifier
+
+        disableCNCheck should be true - otherwise we're open for potential MITM attack
+ -->
+<http-conf:conduit name="*.http-conduit" abstract="false">
+    <http-conf:tlsClientParameters disableCNCheck="true" useHttpsURLConnectionDefaultSslSocketFactory="true" useHttpsURLConnectionDefaultHostnameVerifier="true"/>
+</http-conf:conduit>
+
+<util:list id="factoryFeatures">
+</util:list>
+
+<util:list id="outInterceptors">
+        <ref local="loggingOutInterceptor" />
+</util:list>
+
+<util:list id="inInterceptors">
+        <ref local="loggingInInterceptor" />
+</util:list>
+
+<bean id="loggingOutInterceptor" class="org.apache.cxf.interceptor.LoggingOutInterceptor">
+        <property name="outputLocation">
+                <value>&lt;stdout&gt;</value>
+        </property>
+</bean>
+
+<bean id="loggingInInterceptor" class="org.apache.cxf.interceptor.LoggingInInterceptor">
+        <property name="outputLocation">
+                <value>&lt;stdout&gt;</value>
+        </property>
+</bean>
+
+------------
+

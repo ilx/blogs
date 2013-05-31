@@ -1,0 +1,9 @@
+
+To paste without formatting, and then to go back to normal mode use:
+
+[source]
+--------
+:set paste
+
+:set nopaste
+--------

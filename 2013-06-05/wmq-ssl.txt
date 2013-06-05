@@ -1,0 +1,18 @@
+
+* http://www-01.ibm.com/support/docview.wss?uid=swg21245474[Specifying
+  the userid in the SSL certificate label for an MQ client]
+
+* http://www.abhijeet-kumar.com/2012/08/step-by-step-guide-to-enable-ssl.html[Step
+  by step guide to enable SSL between QM and MQ Explorer]
+
+
+* http://www.abhijeet-kumar.com/2011/11/mq-ssl-gsk7cmd-some-common-commands.html[MQ
+  SSL gsk7cmd some common commands]
+
+
+* http://www.abhijeet-kumar.com/2011/07/decrypt-ibm-stash-files.html[Decrypt
+  IBM stash files]
+
+* http://www.ibm.com/developerworks/websphere/library/techarticles/1001_bonney/1001_bonney.html[Configuring
+  Secure Sockets Layer connectivity in WebSphere MQ File Transfer
+  Edition]

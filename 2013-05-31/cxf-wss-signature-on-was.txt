@@ -7,7 +7,7 @@ Problem
 
 Older versions of WSS4J (before 1.6.9) depended on apache xmlsec library from Santuario as digital signature API provider.
 
-... which doesn't play well with WAS. 
+Which doesn't play well with WebSphere. 
 
 For more details see: 
 https://issues.apache.org/jira/browse/WSS-410[Reduce dependency on xmlsec library]
@@ -46,6 +46,16 @@ public class ProviderInitializationListener implements ServletContextListener {
 
 }
 -------------
+
+Add listener to your web.xml:
+
+[source,xml]
+------------
+        <listener>
+                <listener-class>....security.ProviderInitializationListener</listener-class>
+        </listener>
+------------
+
 
 Now signing should work on WebSphere Application Server.
 

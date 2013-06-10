@@ -23,7 +23,6 @@ Create servlet context listener which will initialize WSS4J:
 
 [source,java]
 -------------
-ActivaExactckage hr.pbzcard.ddkservices.axis2.security;
 import javax.servlet.ServletContextEvent;
 import javax.servlet.ServletContextListener;
 

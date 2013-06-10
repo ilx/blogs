@@ -1,3 +1,14 @@
+* http://publib.boulder.ibm.com/infocenter/wmbhelp/v7r0m0/topic/com.ibm.etools.mft.doc/bp10610_.htm[Creating
+  SSL certificates for the WebSphere MQ Java Client] - describes how
+  to create certificates
+
+* http://hursleyonwmq.wordpress.com/2007/06/29/websphere-mq-ssl-%E2%80%9Cgotchas%E2%80%9D-common-mistakes-and-how-to-avoid-them/[WebSphere
+  MQ SSL “gotchas”: common mistakes and how to avoid them]
+
+* REFRESH SECURITY TYPE(SSL) 
+
+* https://code.google.com/p/wmq-util/[Utility classes for working with
+  WebSphere MQ]
 
 * http://www-01.ibm.com/support/docview.wss?uid=swg21245474[Specifying
   the userid in the SSL certificate label for an MQ client]
@@ -16,3 +27,12 @@
 * http://www.ibm.com/developerworks/websphere/library/techarticles/1001_bonney/1001_bonney.html[Configuring
   Secure Sockets Layer connectivity in WebSphere MQ File Transfer
   Edition]
+
+  * http://pic.dhe.ibm.com/infocenter/wasinfo/v8r0/topic/com.ibm.websphere.ihs.doc/info/ihs/ihs/cihs_ikeycmdline.html[Managing
+    keys with the gskcmd command line interface (Distributed systems)]
+
+* http://publib.boulder.ibm.com/infocenter/wmqv7/v7r0/topic/com.ibm.mq.amqzag.doc/fa16130_.htm[gsk7cmd,
+  runmqckm, and gsk7capicmd commands]
+
+
+

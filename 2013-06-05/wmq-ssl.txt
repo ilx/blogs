@@ -5,6 +5,12 @@
 * http://hursleyonwmq.wordpress.com/2007/06/29/websphere-mq-ssl-%E2%80%9Cgotchas%E2%80%9D-common-mistakes-and-how-to-avoid-them/[WebSphere
   MQ SSL “gotchas”: common mistakes and how to avoid them]
 
+* http://hursleyonwmq.wordpress.com/2007/03/08/custom-sslsocketfactory-with-wmq-base-java/[Custom
+  SSLSocketFactory with WMQ Base Java]
+
+* http://publib.boulder.ibm.com/infocenter/wmqv7/v7r0/topic/com.ibm.mq.csqzaw.doc/jm25320_.htm[Using
+  Secure Sockets Layer (SSL) with WebSphere MQ classes for JMS]
+
 * REFRESH SECURITY TYPE(SSL) 
 
 * https://code.google.com/p/wmq-util/[Utility classes for working with
@@ -28,11 +34,17 @@
   Secure Sockets Layer connectivity in WebSphere MQ File Transfer
   Edition]
 
-  * http://pic.dhe.ibm.com/infocenter/wasinfo/v8r0/topic/com.ibm.websphere.ihs.doc/info/ihs/ihs/cihs_ikeycmdline.html[Managing
-    keys with the gskcmd command line interface (Distributed systems)]
+* http://pic.dhe.ibm.com/infocenter/wasinfo/v8r0/topic/com.ibm.websphere.ihs.doc/info/ihs/ihs/cihs_ikeycmdline.html[Managing
+  keys with the gskcmd command line interface (Distributed systems)]
 
 * http://publib.boulder.ibm.com/infocenter/wmqv7/v7r0/topic/com.ibm.mq.amqzag.doc/fa16130_.htm[gsk7cmd,
   runmqckm, and gsk7capicmd commands]
+
+
+
+WMQ debug parameters:
+-Dcom.ibm.msg.client.commonservices.trace.standalone=true 
+-Dcom.ibm.msg.client.commonservices.log.maxBytes=0
 
 
 

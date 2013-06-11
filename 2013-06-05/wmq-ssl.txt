@@ -1,6 +1,318 @@
+SSL client certificate authentication and WebSphere MQ
+======================================================
+Ivica Lončar
+
+Introduction
+------------
+
+This document describes how to enable new SSL connections to WebSphere
+MQ (basic setup on the server side is already done).
+
+We presume :
+
+- target platform is AIX (or linux)
+- that we already have default websphere MQ key database named
+key.kdb with stash in key.sth
+
+First, export JAVA_HOME:
+
+[source,sh]
+-----------
+export JAVA_HOME=/usr/mqm/java/jre
+-----------
+
+Acoording to IBM:
+
+[quote, IBM, from Technote swg21245474]
+--------------
+*Question*
+
+Does the standard WebSphere MQ SSL configuration require the personal
+certificates' label name with a special format as below?
+
+WebSphere MQ Client: ibmwebspheremq + <User ID>
+WebSphere MQ Server (queue manager): ibmwebspheremq + <QM Name>
+
+Where the User ID or queue manager name must be folded to lower case
+in the label. For example, for a queue manager named QM1, the label is
+ibmwebspheremqqm1.
+
+You want to know if you must comply with the rule for all of your MQ
+Clients, because you have many clients and it will be a big job to
+create unique certificates.
+
+*Cause*
+
+The original design and intent of MQ was that the answer to this
+question should be YES. It is still the intent that it is necessary to
+have a separate personal certificate with a label of
+'ibmwebspheremq<username>' for each client connection. However,
+depending on what MQ maintenance level you are using, you may not see
+this working as designed in some circumstances. In certain scenarios,
+you may be able to get around the intended design.
+
+*Answer*
+
+The gsk6cmd command from GSKit provides -setdefault and -getdefault
+options to set or display a default certificate in a key repository.
+The behavior of this area of code has changed a few times, so here is
+a description of the expected behavior depending on your MQ
+maintenance level.
+
+WebSphere MQ V6
+
+    WebSphere MQ 6.0.0.0 through 6.0.1.1
+    The default certificate will never be used. If you are at this level and
+require default certificate functionality, then you will need the fix for
+IC50156 and must set the AMQ_SSL_ALLOW_DEFAULT_CERT environment variable.
+
+    WebSphere MQ 6.0.2.0 and later
+    The default certificate will only be used if the AMQ_SSL_ALLOW_DEFAULT_CERT
+environment variable is set, and the following conditions are both met: default
+certificate is present, and there is no ibmwebspheremq certificate.
+
+
+WebSphere MQ V7 & LATER Version
+
+    WebSphere MQ 7.0.0.0 and later
+    The default certificate will only be used if the AMQ_SSL_ALLOW_DEFAULT_CERT
+environment variable is set, and the following conditions are both met: default
+certificate is present, and there is no ibmwebspheremq certificate. 
+
+
+Notes:
+1. All of the above holds true if you are using the MQ C client. If you are
+using MQ Java™ or MQ JMS clients the answer is NO, you do not need a unique
+certificate for every client userid. In the MQ Java and MQ JMS client
+environment the label is not used to do the certificate look up. However, a
+personal certificate for the queue manager end still needs a label of
+'ibmwebspheremq<qmgrname>'.
+
+2. The above information does not apply to platforms which do not use GSKit,
+such as z/OS for example or MQ v5.3 for Windows. MQ v6 for Windows does use
+GSkit, so the information is applicable on MQ V6 for Windows.. 
+
+
+Warning:
+
+Please note that the decision to remove default certificate support from
+WebSphere MQ was not made lightly, and was made for a number of security
+concerns. Although we have restored this in a limited way due to specific
+unique requests, this was not the functionality which we expected to see widely
+used. It is certainly not an approach which we recommend.
+
+The administration of an SSL environment is something which we would advise you
+to consider carefully. Certificates are intended to provide a unique
+identification of a specific entity. The ability to establish a chain of trust
+from a trusted signer down to individual certificates allows for some of this
+administration to be delegated, however the use of default certificates makes
+it possible for far greater reuse and sharing of certificates to be achieved
+than is intended. In an extreme case, one default self-signed certificate could
+be used by every client and queue manager on a network, greatly increasing the
+risk of exposure to your network if the certificate becomes compromised.
+
+
+If authentication of clients is not required, then you may find that setting
+SSLCAUTH to OPTIONAL in your channel definitions is a better solution for your
+needs. However, if authentication of clients is important, then you should
+consider whether wide reuse of a default certificate meets that need.
+
+
+--------------
+
+
+
+
+Self signed client certificate
+------------------------------
+
+Let's create client self-signed certificate and add it to the
+server's list of trusted certificates:
+
+[source, sh]
+------------
+# Create kdb (10950 ~ 30 years):
+gsk7capicmd -keydb -create -db client.kdb -pw password -type cms -stash -expire 10950
+
+# Create self signed certificate (1095 ~ 3 years)
+gsk7capicmd -cert -create -db client.kdb -stashed -label environment_clientname -size 2048 -stashed -expire 1095 -dn "CN=clientname,OU=IT,O=My Organization,L=My City,POSTALCODE=10000,C=US"
+
+# Export private certificate from client keystore into transferable pkcs12 format
+gsk7capicmd -cert -export -db client.kdb -stashed -label environment_clientname -target client_personal.p12 -target_pw password -target_type pkcs12
+
+# Export public part of the certificate from client keystore
+gsk7capicmd -cert -extract -db client.kdb -stashed -label environment_clientname -format ascii -target client_cert.arm
+
+# Import public cert into server keystore as trusted certificate
+gsk7capicmd -cert -add -db key.kdb -stashed -label "environment_clientname" -file client_cert.arm -format ascii -trust enable
+
+------------
+
+
+In order to create client JKS keystore:
+
+[source,sh]
+------------
+# Create JKS for the end client
+gsk7cmd -keydb -create -db client.jks -pw password -type jks
+
+# Export public part of server certificate (ibmwebspheremq is fixed # prefix, <queue_manager_name> is a template)
+gsk7capicmd -cert -extract -db key.kdb -stashed -label ibmwebspheremq<queue_manager_name> -format ascii -target server_cert.arm
+
+# Import servers public certificate into client JKS
+gsk7cmd -cert -add -file server_cert.arm -label ibmwebspheremq<queue_manager_name> -db client.jks -pw password -type jks  -format ascii -trust enable
+
+# Import client certificate as default certificate into client keystore:
+gsk7cmd -cert -import -file client_personal.p12 -pw password -target client.jks -target_pw password -target_type jks -label environment_clientname
+
+# List client keystore:
+gsk7cmd -cert -list -db client.jks -pw password -type jks
+
+# Show certificate details:
+gsk7cmd -cert -details -label ibmwebspheremq<queue_manager_name> -db client.jks -pw password -type jks
+------------
+
+
+
+Client certificate - signed with server self-signed certificate
+---------------------------------------------------------------
+
+This way we use servers self signed certificate to sign our clients
+certificate
+
+[source,sh]
+-----------
+# Create client keystore database:
+> gsk7capicmd -keydb -create -db client.kdb -pw password -stash
+
+# Create certificate signing request: 
+# DN should match your target certificate DN (whom do you issue this cert).
+> gsk7capicmd -certreq -create -db client.kdb -stashed -size 2048 -label "nsmqtest1_alf" -dn "CN=nsmqtest1_alf,OU=IT,O=My Organization,L=My City,POSTALCODE=10000,C=US" -file certreq.arm
+
+# List key.kdb cert contents:
+> gsk7capicmd -cert -list -db client.kdb -stashed
+Certificates found:
+* default, - has private key, ! trusted
+!       Thawte Personal Premium CA
+!       Thawte Personal Freemail CA
+!       Thawte Personal Basic CA
+!       Thawte Premium Server CA
+!       Thawte Server CA
+!       VeriSign Class 3 Secure Server CA
+!       VeriSign Class 4 Public Primary Certification Authority - G3
+!       VeriSign Class 3 Public Primary Certification Authority - G5
+!       VeriSign Class 3 Public Primary Certification Authority - G3
+!       VeriSign Class 2 Public Primary Certification Authority - G3
+!       VeriSign Class 1 Public Primary Certification Authority - G3
+!       VeriSign Class 4 Public Primary Certification Authority - G2
+!       VeriSign Class 3 Public Primary Certification Authority - G2
+!       VeriSign Class 2 Public Primary Certification Authority - G2
+!       VeriSign Class 1 Public Primary Certification Authority - G2
+!       VeriSign Class 3 Public Primary Certification Authority
+!       VeriSign Class 2 Public Primary Certification Authority
+!       VeriSign Class 1 Public Primary Certification Authority
+!       Entrust.net Global Secure Server Certification Authority
+!       Entrust.net Global Client Certification Authority
+!       Entrust.net Client Certification Authority
+!       Entrust.net Certification Authority (2048)
+!       Entrust.net Secure Server Certification Authority
+
+# List certificate signing requests:
+> gsk7capicmd -certreq -list -db client.kdb -stashed
+Certificates requests found:
+ ---------
+        nsmqtest1_alf
+        ---------
+        done
+ -----------
+
+# List cert signing request details:
+> gsk7capicmd -certreq -details -db client.kdb -stashed -label nsmqtest1_alf
+Label        : nsmqtest1_alf
+Key Size     : 1024
+Subject      : cn=nsmqtest1_alf, ou=IT, o =My Organization, l =My
+City, c =US
+Finger Print : 0x.............
+Signature Algorithm: 1.2.840.113549.1.1.5
+done
+
+# Sign certificate request:
+> gsk7cmd -cert -sign -db key.kdb -pw <replace_with_your_kdb_pass> -file certreq.arm -label ibmwebspheremq<queue_manager_name> -target certresp.arm -expire 365
+-----------
+
+Now *certresp.arm* contains signed client certificate and we can
+import it to our clients keystore database, BUT prior to receiving
+signed certificate we have to import signers certificate into clients
+keystore:
+
+[source,sh]
+-----------
+# list certificates:
+gsk7capicmd -cert -list -db key.kdb -stashed
+Certificates found:
+* default, - has private key, ! trusted
+        wastest2
+        *-!     ibmwebspheremq<queue_manager_name>
+        !       wastest1
+
+# export signers certificate:
+gsk7capicmd -cert -extract -db key.kdb -stashed -label "ibmwebspheremq<queue_manager_name>" -format ascii -target mqserver.arm
+
+# import signers certificate into client keystore:
+gsk7capicmd -cert -add -db client.kdb -stashed -label "ibmwebspheremq<queue_manager_name>" -format ascii -file mqserver.arm -trust enable
+
+# import client certificate into client keystore
+gsk7capicmd -cert -receive -file certresp.arm -db client.kdb -pw password -format ascii -default_cert yes
+
+# export generated client certificate into PKCS12 file:
+>gsk7capicmd -cert -export -db client.kdb -pw password -label "nsmqtest1_alf" -target nsmqtest1_alf.p12 -target_pw password -target_type pkcs12
+Creating:nsmqtest1_alf.p12
+-----------
+
+Now we can import p12 file into JKS or do whatever we want to do with it.
+
+
+NOTE: After making change to the channels SSL configuration do not forget to execute mqsc comand:
+
+[source,sh]
+-------
+REFRESH SECURITY TYPE(SSL)
+-------
+
+
+Debug MQ client lib
+-------------------
+
+WMQ debug parameters:
+-Dcom.ibm.msg.client.commonservices.trace.standalone=true 
+-Dcom.ibm.msg.client.commonservices.log.maxBytes=0
+
+
+Reference
+---------
+
+* http://www.ibm.com/developerworks/security/tutorials/se-gskit/index.html[Managing
+  certificates with IBM GSKit]
+
+* http://pic.dhe.ibm.com/infocenter/wasinfo/v8r0/topic/com.ibm.websphere.ihs.doc/info/ihs/ihs/cihs_ikeycmdline.html[Managing
+  keys with the gskcmd command line interface (Distributed systems)]
+
+* http://www.abhijeet-kumar.com/2011/11/mq-ssl-gsk7cmd-some-common-commands.html[MQ
+  SSL gsk7cmd some common commands]
+
+* http://www.abhijeet-kumar.com/2011/07/decrypt-ibm-stash-files.html[Decrypt
+  IBM stash files]
+
+* http://www-01.ibm.com/support/docview.wss?uid=swg21245474[Specifying
+  the userid in the SSL certificate label for an MQ client]
+
+* http://www.abhijeet-kumar.com/2012/08/step-by-step-guide-to-enable-ssl.html[Step
+  by step guide to enable SSL between QM and MQ Explorer]
+
 * http://publib.boulder.ibm.com/infocenter/wmbhelp/v7r0m0/topic/com.ibm.etools.mft.doc/bp10610_.htm[Creating
   SSL certificates for the WebSphere MQ Java Client] - describes how
   to create certificates
+
 
 * http://hursleyonwmq.wordpress.com/2007/06/29/websphere-mq-ssl-%E2%80%9Cgotchas%E2%80%9D-common-mistakes-and-how-to-avoid-them/[WebSphere
   MQ SSL “gotchas”: common mistakes and how to avoid them]
@@ -11,40 +323,21 @@
 * http://publib.boulder.ibm.com/infocenter/wmqv7/v7r0/topic/com.ibm.mq.csqzaw.doc/jm25320_.htm[Using
   Secure Sockets Layer (SSL) with WebSphere MQ classes for JMS]
 
-* REFRESH SECURITY TYPE(SSL) 
 
 * https://code.google.com/p/wmq-util/[Utility classes for working with
   WebSphere MQ]
 
-* http://www-01.ibm.com/support/docview.wss?uid=swg21245474[Specifying
-  the userid in the SSL certificate label for an MQ client]
-
-* http://www.abhijeet-kumar.com/2012/08/step-by-step-guide-to-enable-ssl.html[Step
-  by step guide to enable SSL between QM and MQ Explorer]
-
-
-* http://www.abhijeet-kumar.com/2011/11/mq-ssl-gsk7cmd-some-common-commands.html[MQ
-  SSL gsk7cmd some common commands]
-
-
-* http://www.abhijeet-kumar.com/2011/07/decrypt-ibm-stash-files.html[Decrypt
-  IBM stash files]
 
 * http://www.ibm.com/developerworks/websphere/library/techarticles/1001_bonney/1001_bonney.html[Configuring
   Secure Sockets Layer connectivity in WebSphere MQ File Transfer
   Edition]
 
-* http://pic.dhe.ibm.com/infocenter/wasinfo/v8r0/topic/com.ibm.websphere.ihs.doc/info/ihs/ihs/cihs_ikeycmdline.html[Managing
-  keys with the gskcmd command line interface (Distributed systems)]
 
 * http://publib.boulder.ibm.com/infocenter/wmqv7/v7r0/topic/com.ibm.mq.amqzag.doc/fa16130_.htm[gsk7cmd,
   runmqckm, and gsk7capicmd commands]
 
+.NET:
 
-
-WMQ debug parameters:
--Dcom.ibm.msg.client.commonservices.trace.standalone=true 
--Dcom.ibm.msg.client.commonservices.log.maxBytes=0
-
-
+* http://publib.boulder.ibm.com/infocenter/wmqv7/v7r0/topic/com.ibm.mq.csqzav.doc/un10120_.htm[Using
+  .NET and WCF]
 

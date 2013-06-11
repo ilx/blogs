@@ -1,0 +1,53 @@
+<div style="color: #484848; font-family: 'Trebuchet MS', Helvetica, sans-serif">
+<h1>Using WSS4J to sign web service soap message on WAS</h1>
+<p>
+</p>
+<hr>
+<h2><a name="_problem"></a>Problem</h2>
+<p>Older versions of WSS4J (before 1.6.9) depended on apache xmlsec library from Santuario as digital signature API provider.</p>
+<p>Which doesn&#8217;t play well with WebSphere.</p>
+<p>For more details see:
+<a href="https://issues.apache.org/jira/browse/WSS-410">Reduce dependency on xmlsec library</a></p>
+<p>If you&#8217;re using OSGI please use version &gt; 1.6.8 because of <a href="https://issues.apache.org/jira/browse/WSS-417">Cannot deploy WSS4J 1.6.8 to an OSGi container</a></p>
+<hr>
+<h2><a name="_solution"></a>Solution</h2>
+<p>Create servlet context listener which will initialize WSS4J:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">import</font></b> javax<font color="#990000">.</font>servlet<font color="#990000">.</font>ServletContextEvent<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> javax<font color="#990000">.</font>servlet<font color="#990000">.</font>ServletContextListener<font color="#990000">;</font>
+
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>apache<font color="#990000">.</font>ws<font color="#990000">.</font>security<font color="#990000">.</font>WSSConfig<font color="#990000">;</font>
+<i><font color="#9A1900">//import org.apache.ws.security.transform.STRTransformProvider;</font></i>
+<i><font color="#9A1900">//import org.apache.jcp.xml.dsig.internal.dom.XMLDSigRI;;</font></i>
+
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">ProviderInitializationListener</font> <b><font color="#0000FF">implements</font></b> ServletContextListener <font color="#FF0000">{</font>
+    <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">contextDestroyed</font></b><font color="#990000">(</font><b><font color="#0000FF">final</font></b> <font color="#008080">ServletContextEvent</font> pContextEvent<font color="#990000">)</font> <font color="#FF0000">{</font>
+<i><font color="#9A1900">//        Security.removeProvider("STRTransform");</font></i>
+<i><font color="#9A1900">//        Security.removeProvider("ApacheXMLDSig");</font></i>
+    <font color="#FF0000">}</font>
+
+    <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">contextInitialized</font></b><font color="#990000">(</font><b><font color="#0000FF">final</font></b> <font color="#008080">ServletContextEvent</font> pContextEvent<font color="#990000">)</font> <font color="#FF0000">{</font>
+        WSSConfig<font color="#990000">.</font><b><font color="#000000">setUseApacheXmlSecurity</font></b><font color="#990000">(</font><b><font color="#0000FF">false</font></b><font color="#990000">);</font>
+        WSSConfig<font color="#990000">.</font><b><font color="#000000">setAddJceProviders</font></b><font color="#990000">(</font><b><font color="#0000FF">false</font></b><font color="#990000">);</font>
+<i><font color="#9A1900">//        WSSConfig.addJceProvider("ApacheXMLDSig", new XMLDSigRI());</font></i>
+<i><font color="#9A1900">//        WSSConfig.appendJceProvider("STRTransform", new STRTransformProvider());</font></i>
+    <font color="#FF0000">}</font>
+
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<p>Add listener to your web.xml:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt>        <b><font color="#0000FF">&lt;listener&gt;</font></b>
+                <b><font color="#0000FF">&lt;listener-class&gt;</font></b>....security.ProviderInitializationListener<b><font color="#0000FF">&lt;/listener-class&gt;</font></b>
+        <b><font color="#0000FF">&lt;/listener&gt;</font></b></tt></pre></td></tr></table>
+<p>Now signing should work on WebSphere Application Server.</p>
+<p>Please note that this solves only signing problems (since wss4j uses JSR-105),
+but not encryption related problems since encryption API (JSR-106) is not
+standardized and WSS4J dependes on Santuario.</p>
+<p>OpenSAML still depends on Santuario, so if you use SAML this will not help.</p>
+</div>

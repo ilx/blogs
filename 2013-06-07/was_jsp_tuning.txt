@@ -1,0 +1,12 @@
+JSP engine configuration on WebSphere
+=====================================
+
+
+* http://pic.dhe.ibm.com/infocenter/wasinfo/v8r0/topic/com.ibm.websphere.express.doc/info/exp/ae/rweb_jspdis.html[JSP
+  run time compilation settings]
+* http://pic.dhe.ibm.com/infocenter/wasinfo/v8r0/topic/com.ibm.websphere.express.doc/info/exp/ae/rweb_jspengine.html[JSP
+  engine configuration parameters]
+* http://pic.dhe.ibm.com/infocenter/wasinfo/v8r0/topic/com.ibm.websphere.nd.doc/info/ae/ae/rweb_jspreloading.html[JavaServer
+    Pages (JSP) runtime reloading settings]
+
+

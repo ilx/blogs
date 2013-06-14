@@ -94,7 +94,7 @@ public class EnvironmentAwareApplicationContextInitializer implements Applicatio
 	
 }
 -------------
-[NOTE] 
+NOTE:
 <1> The magic happens because Spring MVC adds JNDI Property Source to the Configurable environment, so lookup for "cell/persistent/NS_SERVER_ENV" works (note that we defined NS_SERVER_ENV at the cell scope! if you define it at other scope you must change the lookup).  
 
 

@@ -1,0 +1,28 @@
+WebSphere Administration: How to Force Node Synchronization
+
+From http://myarch.com/how-to-force-node-synchronization:
+
+[source, python]
+----------------
+
+"""
+Sync configuration changes with nodes
+"""
+
+# Commit changes to the configuration repository 
+AdminConfig.save()
+
+# Obtain deployment manager MBean
+dm=AdminControl.queryNames("type=DeploymentManager,*")
+
+# "syncActiveNodes" can only be run on the deployment manager's MBean, 
+# it will fail in standalone environment
+if dm:
+    print "Synchronizing configuration repository with nodes. Please wait..."
+    # Force sync with all currently active nodes
+    nodes=AdminControl.invoke(dm, "syncActiveNodes", "true")
+    print "The following nodes have been synchronized: "+str(nodes)
+else:
+    print "Standalone server, no nodes to sync"
+----------------
+

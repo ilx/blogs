@@ -1,0 +1,30 @@
+import re
+
+server_confids=AdminConfig.list("Server")
+
+def generate_dump(serverName):
+	serverJvm = AdminControl.queryNames('WebSphere:type=JVM,process=' + serverName + ',*')
+	print 'Generating dump for server: ' + serverJvm
+	dumpFile = AdminControl.invoke(serverJvm, 'generateHeapDump')
+	print 'Heap dump location: ' + dumpFile
+
+def reset_max_heapdumps(serverName, count):
+	serverJvm = AdminControl.queryNames('WebSphere:type=JVM,process=' + serverName + ',*')
+	print 'setting max number of heap dumps for ' + serverName + ' to ' + count
+	AdminControl.setAttribute(serverJvm, "maxHeapDumpsOnDisk", count)
+	AdminConfig.save()
+
+def generate_dump_for_servers(server_name_pattern):
+	for server_confid in server_confids.split("\n"):
+		server_confid=server_confid.strip()
+		server_type=AdminConfig.showAttribute(server_confid, "serverType")
+		if server_type=="APPLICATION_SERVER":
+			server_name=AdminConfig.showAttribute(server_confid, "name")
+			if re.match(server_name_pattern, server_name) != None:
+				print "Found " + server_name
+#				reset_max_heapdumps(server_name, '20')
+				generate_dump(server_name)
+	print "---------------------------------"
+
+generate_dump_for_servers('Cluster_Services_P1')
+

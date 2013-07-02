@@ -1,0 +1,240 @@
+<div style="color: #484848; font-family: 'Trebuchet MS', Helvetica, sans-serif">
+<h1>Script to configure JDBC, Datasource , J2C Auth, Connection Pool Settting at Cluster level Scope</h1>
+<p>
+</p>
+<a name="preamble"></a>
+<p>From <a href="http://websphere-automation.blogspot.com/2009/11/script-to-configure-jdbc-datasource-j2c.html">http://websphere-automation.blogspot.com/2009/11/script-to-configure-jdbc-datasource-j2c.html</a>:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">import</font></b> sys<font color="#990000">,</font>java
+<b><font color="#000080">from</font></b> java<font color="#990000">.</font>util <b><font color="#000080">import</font></b> Properties
+<b><font color="#000080">from</font></b> java<font color="#990000">.</font>io <b><font color="#000080">import</font></b> FileInputStream
+<b><font color="#000080">from</font></b> org<font color="#990000">.</font>python<font color="#990000">.</font>modules <b><font color="#000080">import</font></b> time
+lineSep <font color="#990000">=</font> java<font color="#990000">.</font>lang<font color="#990000">.</font>System<font color="#990000">.</font><b><font color="#000000">getProperty</font></b><font color="#990000">(</font><font color="#FF0000">'line.separator'</font><font color="#990000">)</font>
+
+<b><font color="#0000FF">def</font></b> <b><font color="#000000">datasource</font></b><font color="#990000">(</font>cluster<font color="#990000">,</font>user<font color="#990000">,</font>password<font color="#990000">,</font>url<font color="#990000">,</font>env<font color="#990000">,</font>jdbc_driver<font color="#990000">,</font>timeOut<font color="#990000">,</font>maxConn<font color="#990000">,</font>minConn<font color="#990000">,</font>reapTime<font color="#990000">,</font>unusdTimeout<font color="#990000">,</font>agedTimeout<font color="#990000">):</font>
+
+        <i><font color="#9A1900"># Declare global variables</font></i>
+        <b><font color="#0000FF">global</font></b> AdminConfig
+        <b><font color="#0000FF">global</font></b> AdminControl
+
+        <i><font color="#9A1900">## JDBCProvider ##</font></i>
+        name <font color="#990000">=</font> <font color="#FF0000">"jdbcOracle"</font><font color="#990000">+</font> env
+
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Name of JDBC Provider which will be created ---&gt; "</font> <font color="#990000">+</font> name
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+        <i><font color="#9A1900"># Gets the name of cell</font></i>
+        cell <font color="#990000">=</font> AdminControl<font color="#990000">.</font><b><font color="#000000">getCell</font></b><font color="#990000">()</font>
+        cellid <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">getid</font></b><font color="#990000">(</font><font color="#FF0000">'/Cell:'</font><font color="#990000">+</font> cell <font color="#990000">+</font><font color="#FF0000">'/'</font><font color="#990000">)</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+
+        <i><font color="#9A1900"># checking for the existence of Cluster</font></i>
+        Serverid <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">getid</font></b><font color="#990000">(</font><font color="#FF0000">'/Cell:'</font><font color="#990000">+</font> cell <font color="#990000">+</font><font color="#FF0000">'/ServerCluster:'</font><font color="#990000">+</font> cluster <font color="#990000">+</font><font color="#FF0000">'/'</font><font color="#990000">)</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Checking for existence of Server :"</font> <font color="#990000">+</font> cluster
+        <b><font color="#0000FF">if</font></b> <b><font color="#000000">len</font></b><font color="#990000">(</font>Serverid<font color="#990000">)</font> <font color="#990000">==</font> <font color="#993399">0</font><font color="#990000">:</font>
+                <b><font color="#0000FF">print</font></b> <font color="#FF0000">"Cluster doesnot exists "</font>
+        <b><font color="#0000FF">else</font></b><font color="#990000">:</font>
+                <b><font color="#0000FF">print</font></b> <font color="#FF0000">"Cluster exist:"</font><font color="#990000">+</font> cluster
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+
+        <i><font color="#9A1900">## removing old jdbc provider and creating a new jdbc provider</font></i>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Checking for the existence of JDBC Provider :"</font><font color="#990000">+</font> name
+        s2 <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">getid</font></b><font color="#990000">(</font><font color="#FF0000">'/Cell:'</font><font color="#990000">+</font> cell <font color="#990000">+</font><font color="#FF0000">'/ServerCluster:'</font><font color="#990000">+</font> cluster <font color="#990000">+</font><font color="#FF0000">'/JDBCProvider:'</font><font color="#990000">+</font> name<font color="#990000">)</font>
+        <b><font color="#0000FF">if</font></b> <b><font color="#000000">len</font></b><font color="#990000">(</font>s2<font color="#990000">)</font> <font color="#990000">&gt;</font> <font color="#993399">0</font><font color="#990000">:</font>
+                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" JDBC Provider exists with name :"</font><font color="#990000">+</font> name
+                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Removing JDBC Provider with name :"</font><font color="#990000">+</font> name
+                AdminConfig<font color="#990000">.</font><b><font color="#000000">remove</font></b><font color="#990000">(</font>s2<font color="#990000">)</font>
+                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" JDBC Provider removed "</font>
+                AdminConfig<font color="#990000">.</font><b><font color="#000000">save</font></b><font color="#990000">()</font>
+                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Saving Configuraion "</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+
+        <i><font color="#9A1900">## Creating New JDBC Provider ##</font></i>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Creating New JDBC Provider :"</font><font color="#990000">+</font> name
+        n1 <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"name"</font> <font color="#990000">,</font> name <font color="#990000">]</font>
+        desc <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"description"</font> <font color="#990000">,</font> <font color="#FF0000">"Oracle JDBC Driver"</font><font color="#990000">]</font>
+        impn <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"implementationClassName"</font> <font color="#990000">,</font> <font color="#FF0000">"oracle.jdbc.pool.OracleConnectionPoolDataSource"</font><font color="#990000">]</font>
+        classpath <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"classpath"</font> <font color="#990000">,</font> jdbc_driver <font color="#990000">]</font>
+        attrs1 <font color="#990000">=</font> <font color="#990000">[</font>n1 <font color="#990000">,</font> impn <font color="#990000">,</font> desc <font color="#990000">,</font> classpath<font color="#990000">]</font>
+        jdbc <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">create</font></b><font color="#990000">(</font><font color="#FF0000">'JDBCProvider'</font> <font color="#990000">,</font> Serverid <font color="#990000">,</font> attrs1<font color="#990000">)</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" New JDBC Provider created :"</font><font color="#990000">+</font> name
+        AdminConfig<font color="#990000">.</font><b><font color="#000000">save</font></b><font color="#990000">()</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Saving Configuraion "</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+
+        <i><font color="#9A1900">## checking for the existence of JAASAuthData and deleting ##</font></i>
+        node <font color="#990000">=</font> AdminControl<font color="#990000">.</font><b><font color="#000000">getNode</font></b><font color="#990000">()</font>
+        alias1 <font color="#990000">=</font> node <font color="#990000">+</font><font color="#FF0000">"/"</font><font color="#990000">+</font> env
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Checking for the existence of JAASAUTHDATA :"</font><font color="#990000">+</font> alias1
+        jaasAuthDataList <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">list</font></b><font color="#990000">(</font><font color="#FF0000">"JAASAuthData"</font><font color="#990000">)</font>
+        <b><font color="#0000FF">if</font></b> <b><font color="#000000">len</font></b><font color="#990000">(</font>jaasAuthDataList<font color="#990000">)</font> <font color="#990000">==</font> <font color="#993399">0</font><font color="#990000">:</font>
+                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Creating New JAASAuthData with Alias name :"</font><font color="#990000">+</font> alias1
+                sec <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">getid</font></b><font color="#990000">(</font><font color="#FF0000">'/Cell:'</font><font color="#990000">+</font> cell <font color="#990000">+</font><font color="#FF0000">'/Security:/'</font><font color="#990000">)</font>
+                alias_attr <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"alias"</font> <font color="#990000">,</font> alias1<font color="#990000">]</font>
+                desc_attr <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"description"</font> <font color="#990000">,</font> <font color="#FF0000">"alias"</font><font color="#990000">]</font>
+                userid_attr <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"userId"</font> <font color="#990000">,</font> user <font color="#990000">]</font>
+                password_attr <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"password"</font> <font color="#990000">,</font> password<font color="#990000">]</font>
+                attrs <font color="#990000">=</font> <font color="#990000">[</font>alias_attr <font color="#990000">,</font> desc_attr <font color="#990000">,</font> userid_attr <font color="#990000">,</font> password_attr <font color="#990000">]</font>
+                authdata <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">create</font></b><font color="#990000">(</font><font color="#FF0000">'JAASAuthData'</font> <font color="#990000">,</font> sec <font color="#990000">,</font> attrs<font color="#990000">)</font>
+                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Created new JASSAuthData with Alias name :"</font><font color="#990000">+</font> alias1
+                AdminConfig<font color="#990000">.</font><b><font color="#000000">save</font></b><font color="#990000">()</font>
+                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Saving Configuraion "</font>
+                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+        <b><font color="#0000FF">else</font></b> <font color="#990000">:</font>
+                matchFound <font color="#990000">=</font> <font color="#993399">0</font>
+                jaasAuthDataList <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">list</font></b><font color="#990000">(</font><font color="#FF0000">"JAASAuthData"</font><font color="#990000">)</font>
+                jaasAuthDataList<font color="#990000">=</font>jaasAuthDataList<font color="#990000">.</font><b><font color="#000000">split</font></b><font color="#990000">(</font>lineSeparator<font color="#990000">)</font>
+                <b><font color="#0000FF">for</font></b> jaasAuthId <b><font color="#0000FF">in</font></b> jaasAuthDataList<font color="#990000">:</font>
+                        getAlias <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">showAttribute</font></b><font color="#990000">(</font>jaasAuthId<font color="#990000">,</font> <font color="#FF0000">"alias"</font><font color="#990000">)</font>
+                        <b><font color="#0000FF">if</font></b> <font color="#990000">(</font><b><font color="#000000">cmp</font></b><font color="#990000">(</font>getAlias<font color="#990000">,</font>alias1<font color="#990000">)</font> <font color="#990000">==</font> <font color="#993399">0</font><font color="#990000">):</font>
+                                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" JAASAuthData exists with name :"</font><font color="#990000">+</font> alias1
+                                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Removing JAASAuthData with name :"</font><font color="#990000">+</font> alias1
+                                AdminConfig<font color="#990000">.</font><b><font color="#000000">remove</font></b><font color="#990000">(</font>jaasAuthId<font color="#990000">)</font>
+                                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" JAASAuthData removed "</font>
+                                AdminConfig<font color="#990000">.</font><b><font color="#000000">save</font></b><font color="#990000">()</font>
+                                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Saving Configuraion "</font>
+                                matchFound <font color="#990000">=</font> <font color="#993399">1</font>
+                                <b><font color="#0000FF">break</font></b>
+                <b><font color="#0000FF">if</font></b> <font color="#990000">(</font>matchFound <font color="#990000">==</font> <font color="#993399">0</font><font color="#990000">):</font>
+                        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" No match was found for the given JASSAuthData : "</font><font color="#990000">+</font> alias1
+                <i><font color="#9A1900">#endIf</font></i>
+                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+
+        <i><font color="#9A1900">## J2C Authentication Entries ##</font></i>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Creating New JAASAuthData with Alias name :"</font><font color="#990000">+</font> alias1
+        sec <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">getid</font></b><font color="#990000">(</font><font color="#FF0000">'/Cell:'</font><font color="#990000">+</font> cell <font color="#990000">+</font><font color="#FF0000">'/Security:/'</font><font color="#990000">)</font>
+        alias_attr <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"alias"</font> <font color="#990000">,</font> alias1<font color="#990000">]</font>
+        desc_attr <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"description"</font> <font color="#990000">,</font> <font color="#FF0000">"alias"</font><font color="#990000">]</font>
+        userid_attr <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"userId"</font> <font color="#990000">,</font> user <font color="#990000">]</font>
+        password_attr <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"password"</font> <font color="#990000">,</font> password<font color="#990000">]</font>
+        attrs <font color="#990000">=</font> <font color="#990000">[</font>alias_attr <font color="#990000">,</font> desc_attr <font color="#990000">,</font> userid_attr <font color="#990000">,</font> password_attr <font color="#990000">]</font>
+        authdata <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">create</font></b><font color="#990000">(</font><font color="#FF0000">'JAASAuthData'</font> <font color="#990000">,</font> sec <font color="#990000">,</font> attrs<font color="#990000">)</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Created new JASSAuthData with Alias name :"</font><font color="#990000">+</font> alias1
+        AdminConfig<font color="#990000">.</font><b><font color="#000000">save</font></b><font color="#990000">()</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Saving Configuraion "</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+
+        <i><font color="#9A1900">## DataSource ##</font></i>
+        datasource <font color="#990000">=</font> <font color="#FF0000">"DataSource"</font><font color="#990000">+</font> env
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Name of datasource which will be created on JDBC Provider :"</font><font color="#990000">+</font> name <font color="#990000">+</font><font color="#FF0000">" is :"</font><font color="#990000">+</font> datasource
+        ds <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">getid</font></b><font color="#990000">(</font><font color="#FF0000">'/Cell:'</font><font color="#990000">+</font> cell <font color="#990000">+</font><font color="#FF0000">'/ServerCluster:'</font><font color="#990000">+</font> cluster <font color="#990000">+</font><font color="#FF0000">'/JDBCProvider:'</font><font color="#990000">+</font> name<font color="#990000">)</font>
+        name1 <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"name"</font> <font color="#990000">,</font> datasource<font color="#990000">]</font>
+        jndi <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"jndiName"</font> <font color="#990000">,</font> <font color="#FF0000">"jdbc/tiers3DS"</font><font color="#990000">]</font>
+        authentication <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"authDataAlias"</font> <font color="#990000">,</font> alias1<font color="#990000">]</font>
+        st_cachesize <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"statementCacheSize"</font> <font color="#990000">,</font> <font color="#FF0000">"150"</font><font color="#990000">]</font>
+        ds_hlpclass <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"datasourceHelperClassname"</font> <font color="#990000">,</font> <font color="#FF0000">"com.ibm.websphere.rsadapter.Oracle10gDataStoreHelper"</font><font color="#990000">]</font>
+        map_configalias_attr<font color="#990000">=[</font><font color="#FF0000">"mappingConfigAlias"</font><font color="#990000">,</font> <font color="#FF0000">"DefaultPrincipalMapping"</font><font color="#990000">]</font>
+        map_attrs<font color="#990000">=[</font>authentication <font color="#990000">,</font> map_configalias_attr<font color="#990000">]</font>
+        mapping_attr<font color="#990000">=[</font><font color="#FF0000">"mapping"</font><font color="#990000">,</font> map_attrs<font color="#990000">]</font>
+        ds_attr <font color="#990000">=</font> <font color="#990000">[</font>name1 <font color="#990000">,</font> jndi <font color="#990000">,</font> authentication <font color="#990000">,</font> st_cachesize <font color="#990000">,</font> ds_hlpclass <font color="#990000">,</font>mapping_attr <font color="#990000">]</font>
+        newds <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">create</font></b><font color="#990000">(</font><font color="#FF0000">'DataSource'</font> <font color="#990000">,</font> ds <font color="#990000">,</font> ds_attr<font color="#990000">)</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" New DataSource created with name :"</font><font color="#990000">+</font> datasource
+        AdminConfig<font color="#990000">.</font><b><font color="#000000">save</font></b><font color="#990000">()</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Saving Configuraion "</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+
+        <i><font color="#9A1900">## set the properties for the datasource ##</font></i>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Setting the properties for DataSource :"</font><font color="#990000">+</font> datasource
+        newds1 <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">getid</font></b><font color="#990000">(</font><font color="#FF0000">'/Cell:'</font><font color="#990000">+</font> cell <font color="#990000">+</font><font color="#FF0000">'/ServerCluster:'</font><font color="#990000">+</font> cluster <font color="#990000">+</font><font color="#FF0000">'/JDBCProvider:'</font><font color="#990000">+</font> name <font color="#990000">+</font><font color="#FF0000">'/DataSource:'</font><font color="#990000">+</font> datasource<font color="#990000">)</font>
+        propSet <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">create</font></b><font color="#990000">(</font><font color="#FF0000">'J2EEResourcePropertySet'</font> <font color="#990000">,</font> newds1 <font color="#990000">,</font> <font color="#FF0000">""</font><font color="#990000">)</font>
+        name3 <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"name"</font> <font color="#990000">,</font> <font color="#FF0000">"URL"</font><font color="#990000">]</font>
+        type <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"type"</font> <font color="#990000">,</font> <font color="#FF0000">"java.lang.String"</font><font color="#990000">]</font>
+        required <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"required"</font> <font color="#990000">,</font> <font color="#FF0000">"true"</font><font color="#990000">]</font>
+        value <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"value"</font> <font color="#990000">,</font> url<font color="#990000">]</font>
+        rpAttrs <font color="#990000">=</font> <font color="#990000">[</font>name3 <font color="#990000">,</font> type <font color="#990000">,</font> required <font color="#990000">,</font> value<font color="#990000">]</font>
+        jrp <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">create</font></b><font color="#990000">(</font><font color="#FF0000">'J2EEResourceProperty'</font> <font color="#990000">,</font> propSet <font color="#990000">,</font> rpAttrs<font color="#990000">)</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Properties created for DataSource :"</font><font color="#990000">+</font> datasource
+        AdminConfig<font color="#990000">.</font><b><font color="#000000">save</font></b><font color="#990000">()</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Saving Configuraion "</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+
+        <i><font color="#9A1900"># Create an associated connection pool for the new DataSource#</font></i>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Creating Connection Pool Setting for DataSource :"</font><font color="#990000">+</font> datasource
+        timeout <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"connectionTimeout"</font> <font color="#990000">,</font> timeOut<font color="#990000">]</font>
+        maxconn <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"maxConnections"</font> <font color="#990000">,</font> maxConn<font color="#990000">]</font>
+        minconn <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"minConnections"</font> <font color="#990000">,</font> minConn<font color="#990000">]</font>
+        reaptime <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"reapTime"</font> <font color="#990000">,</font> reapTime<font color="#990000">]</font>
+        unusedtimeout <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"unusedTimeout"</font> <font color="#990000">,</font> unusdTimeout<font color="#990000">]</font>
+        agedtimeout <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"agedTimeout"</font> <font color="#990000">,</font> agedTimeout<font color="#990000">]</font>
+        purgepolicy <font color="#990000">=</font> <font color="#990000">[</font><font color="#FF0000">"purgePolicy"</font> <font color="#990000">,</font> <font color="#FF0000">"EntirePool"</font><font color="#990000">]</font>
+        connPoolAttrs <font color="#990000">=</font> <font color="#990000">[</font>timeout <font color="#990000">,</font> maxconn <font color="#990000">,</font> minconn <font color="#990000">,</font> reaptime <font color="#990000">,</font> unusedtimeout <font color="#990000">,</font> agedtimeout <font color="#990000">,</font> purgepolicy<font color="#990000">]</font>
+        AdminConfig<font color="#990000">.</font><b><font color="#000000">create</font></b><font color="#990000">(</font><font color="#FF0000">"ConnectionPool"</font><font color="#990000">,</font> newds <font color="#990000">,</font> connPoolAttrs<font color="#990000">)</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Connection Pool Setting created for DataSource :"</font><font color="#990000">+</font> datasource
+        AdminConfig<font color="#990000">.</font><b><font color="#000000">save</font></b><font color="#990000">()</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Saving Configuraion "</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+
+
+        <i><font color="#9A1900">## Full Syncronization ##</font></i>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Syncronizing configuration with Master Repository "</font>
+        nodelist <font color="#990000">=</font> AdminTask<font color="#990000">.</font><b><font color="#000000">listManagedNodes</font></b><font color="#990000">().</font><b><font color="#000000">split</font></b><font color="#990000">(</font>lineSep<font color="#990000">)</font>
+        <b><font color="#0000FF">for</font></b> nodename <b><font color="#0000FF">in</font></b> nodelist <font color="#990000">:</font>
+                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Doing Full Resyncronization of node.......... "</font>
+                <i><font color="#9A1900">####################Identifying the ConfigRepository MBean and assign it to variable######################</font></i>
+                repo <font color="#990000">=</font> AdminControl<font color="#990000">.</font><b><font color="#000000">completeObjectName</font></b><font color="#990000">(</font><font color="#FF0000">'type=ConfigRepository,process=nodeagent,node='</font><font color="#990000">+</font> nodename <font color="#990000">+</font><font color="#FF0000">',*'</font><font color="#990000">)</font>
+                <b><font color="#0000FF">print</font></b> AdminControl<font color="#990000">.</font><b><font color="#000000">invoke</font></b><font color="#990000">(</font>repo<font color="#990000">,</font> <font color="#FF0000">'refreshRepositoryEpoch'</font><font color="#990000">)</font>
+                sync <font color="#990000">=</font> AdminControl<font color="#990000">.</font><b><font color="#000000">completeObjectName</font></b><font color="#990000">(</font><font color="#FF0000">'cell='</font><font color="#990000">+</font> cell <font color="#990000">+</font><font color="#FF0000">',node='</font><font color="#990000">+</font> nodename <font color="#990000">+</font><font color="#FF0000">',type=NodeSync,*'</font><font color="#990000">)</font>
+                <b><font color="#0000FF">print</font></b> AdminControl<font color="#990000">.</font><b><font color="#000000">invoke</font></b><font color="#990000">(</font>sync <font color="#990000">,</font> <font color="#FF0000">'sync'</font><font color="#990000">)</font>
+                <i><font color="#9A1900">#time.sleep(20)</font></i>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Full Resyncronization completed "</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+
+        <i><font color="#9A1900">#######Restarting Node Agent#########</font></i>
+        nodelist <font color="#990000">=</font> AdminTask<font color="#990000">.</font><b><font color="#000000">listManagedNodes</font></b><font color="#990000">().</font><b><font color="#000000">split</font></b><font color="#990000">(</font>lineSep<font color="#990000">)</font>
+        <b><font color="#0000FF">for</font></b> nodename <b><font color="#0000FF">in</font></b> nodelist <font color="#990000">:</font>
+                <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Restarting Nodeagent of "</font><font color="#990000">+</font>nodename<font color="#990000">+</font><font color="#FF0000">" node "</font>
+                na <font color="#990000">=</font> AdminControl<font color="#990000">.</font><b><font color="#000000">queryNames</font></b><font color="#990000">(</font><font color="#FF0000">'type=NodeAgent,node='</font><font color="#990000">+</font>nodename<font color="#990000">+</font><font color="#FF0000">',*'</font><font color="#990000">)</font>
+                AdminControl<font color="#990000">.</font><b><font color="#000000">invoke</font></b><font color="#990000">(</font>na<font color="#990000">,</font><font color="#FF0000">'restart'</font><font color="#990000">,</font><font color="#FF0000">'true true'</font><font color="#990000">)</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+
+        time<font color="#990000">.</font><b><font color="#000000">sleep</font></b><font color="#990000">(</font><font color="#993399">30</font><font color="#990000">)</font>
+
+        <i><font color="#9A1900">##########Testing Database Connection################</font></i>
+        dsid <font color="#990000">=</font> AdminConfig<font color="#990000">.</font><b><font color="#000000">getid</font></b><font color="#990000">(</font><font color="#FF0000">'/ServerCluster:'</font><font color="#990000">+</font> cluster <font color="#990000">+</font><font color="#FF0000">'/JDBCProvider:'</font><font color="#990000">+</font> name <font color="#990000">+</font><font color="#FF0000">'/DataSource:'</font><font color="#990000">+</font> datasource <font color="#990000">+</font><font color="#FF0000">'/'</font><font color="#990000">)</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" Testing Database Connection"</font>
+        <b><font color="#0000FF">print</font></b> AdminControl<font color="#990000">.</font><b><font color="#000000">testConnection</font></b><font color="#990000">(</font>dsid<font color="#990000">)</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+
+<i><font color="#9A1900">####################################################################################################################</font></i>
+<i><font color="#9A1900">####################################################################################################################</font></i>
+
+<i><font color="#9A1900">#main program starts here</font></i>
+arglen<font color="#990000">=</font><b><font color="#000000">len</font></b><font color="#990000">(</font>sys<font color="#990000">.</font>argv<font color="#990000">)</font>
+num_exp_args<font color="#990000">=</font><font color="#993399">2</font>
+<b><font color="#0000FF">if</font></b> <font color="#990000">(</font>arglen <font color="#990000">!=</font> num_exp_args<font color="#990000">):</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">"Two arguments are required.one of them is property file"</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+        sys<font color="#990000">.</font><b><font color="#000000">exit</font></b><font color="#990000">(-</font><font color="#993399">1</font><font color="#990000">)</font>
+
+propFile<font color="#990000">=</font>sys<font color="#990000">.</font>argv<font color="#990000">[</font><font color="#993399">0</font><font color="#990000">]</font>
+properties<font color="#990000">=</font><b><font color="#000000">Properties</font></b><font color="#990000">();</font>
+
+<b><font color="#0000FF">try</font></b><font color="#990000">:</font>
+        properties<font color="#990000">.</font><b><font color="#000000">load</font></b><font color="#990000">(</font><b><font color="#000000">FileInputStream</font></b><font color="#990000">(</font>propFile<font color="#990000">))</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">"Succesfully read property file "</font><font color="#990000">+</font>propFile
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+<b><font color="#0000FF">except</font></b><font color="#990000">:</font>
+        <b><font color="#0000FF">print</font></b> <font color="#FF0000">"Cannot read property file "</font><font color="#990000">+</font>propFile
+        sys<font color="#990000">.</font><b><font color="#000000">exit</font></b><font color="#990000">(-</font><font color="#993399">1</font><font color="#990000">)</font>
+
+<b><font color="#0000FF">print</font></b> <font color="#FF0000">" ----------------------------------------------------------------------------------------- "</font>
+cluster <font color="#990000">=</font> <b><font color="#000000">str</font></b><font color="#990000">(</font>properties<font color="#990000">.</font><b><font color="#000000">getProperty</font></b><font color="#990000">(</font><font color="#FF0000">"CLUSTER_NAME"</font><font color="#990000">))</font>
+env <font color="#990000">=</font> sys<font color="#990000">.</font>argv<font color="#990000">[</font><font color="#993399">1</font><font color="#990000">]</font>
+user <font color="#990000">=</font> <b><font color="#000000">str</font></b><font color="#990000">(</font>properties<font color="#990000">.</font><b><font color="#000000">getProperty</font></b><font color="#990000">(</font><font color="#FF0000">"dbms.userId"</font><font color="#990000">))</font>
+password <font color="#990000">=</font> <b><font color="#000000">str</font></b><font color="#990000">(</font>properties<font color="#990000">.</font><b><font color="#000000">getProperty</font></b><font color="#990000">(</font><font color="#FF0000">"dbms.password"</font><font color="#990000">))</font>
+url <font color="#990000">=</font> <b><font color="#000000">str</font></b><font color="#990000">(</font>properties<font color="#990000">.</font><b><font color="#000000">getProperty</font></b><font color="#990000">(</font><font color="#FF0000">"dbms.url"</font><font color="#990000">))</font>
+jdbc_driver <font color="#990000">=</font> <b><font color="#000000">str</font></b><font color="#990000">(</font>properties<font color="#990000">.</font><b><font color="#000000">getProperty</font></b><font color="#990000">(</font><font color="#FF0000">"JDBC_DRIVER_PATH"</font><font color="#990000">))</font>
+timeOut <font color="#990000">=</font> <b><font color="#000000">int</font></b><font color="#990000">(</font>properties<font color="#990000">.</font><b><font color="#000000">getProperty</font></b><font color="#990000">(</font><font color="#FF0000">"TIMEOUT"</font><font color="#990000">))</font>
+maxConn <font color="#990000">=</font> <b><font color="#000000">int</font></b><font color="#990000">(</font>properties<font color="#990000">.</font><b><font color="#000000">getProperty</font></b><font color="#990000">(</font><font color="#FF0000">"MAXCONN"</font><font color="#990000">))</font>
+minConn <font color="#990000">=</font> <b><font color="#000000">int</font></b><font color="#990000">(</font>properties<font color="#990000">.</font><b><font color="#000000">getProperty</font></b><font color="#990000">(</font><font color="#FF0000">"MINCONN"</font><font color="#990000">))</font>
+reapTime <font color="#990000">=</font> <b><font color="#000000">int</font></b><font color="#990000">(</font>properties<font color="#990000">.</font><b><font color="#000000">getProperty</font></b><font color="#990000">(</font><font color="#FF0000">"REAPTIME"</font><font color="#990000">))</font>
+unusdTimeout <font color="#990000">=</font> <b><font color="#000000">int</font></b><font color="#990000">(</font>properties<font color="#990000">.</font><b><font color="#000000">getProperty</font></b><font color="#990000">(</font><font color="#FF0000">"UNUSEDTIMEOUT"</font><font color="#990000">))</font>
+agedTimeout <font color="#990000">=</font> <b><font color="#000000">int</font></b><font color="#990000">(</font>properties<font color="#990000">.</font><b><font color="#000000">getProperty</font></b><font color="#990000">(</font><font color="#FF0000">"AGEDTIMEOUT"</font><font color="#990000">))</font>
+
+<b><font color="#000000">datasource</font></b><font color="#990000">(</font>cluster<font color="#990000">,</font>user<font color="#990000">,</font>password<font color="#990000">,</font>url<font color="#990000">,</font>env<font color="#990000">,</font>jdbc_driver<font color="#990000">,</font>timeOut<font color="#990000">,</font>maxConn<font color="#990000">,</font>minConn<font color="#990000">,</font>reapTime<font color="#990000">,</font>unusdTimeout<font color="#990000">,</font>agedTimeout<font color="#990000">)</font>
+</tt></pre></td></tr></table>
+</div>

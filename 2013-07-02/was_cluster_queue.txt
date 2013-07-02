@@ -1,0 +1,73 @@
+Jython Script to creating queue destination at cluster scope. 
+=============================================================
+
+From http://websphere-automation.blogspot.com/2011/11/jython-script-to-creating-queue.html:
+
+[source,python]
+---------------
+import sys,java
+from java.util import Properties
+from java.io import FileInputStream
+from org.python.modules import time
+lineSep = java.lang.System.getProperty('line.separator')
+
+def QF(cluster,qmanager,jndiname,queue_name,target,name):
+	# Declare global variables
+	global AdminConfig
+	global AdminControl
+	# Gets the name of cell
+	cell = AdminControl.getCell()
+	cellid = AdminConfig.getid('/Cell:'+ cell +'/')
+	print " ----------------------------------------------------------------------------------------- "
+	Serverid = AdminConfig.getid('/Cell:'+ cell +'/ServerCluster:'+ cluster +'/')
+	
+	#------QueueConnectionFactory--------#
+	MS=AdminConfig.getid('/ServerCluster:'+ cluster +'/JMSProvider:WebSphere MQ JMS Provider/')
+	QD=AdminConfig.getid('/ServerCluster:'+ cluster +'/JMSProvider:WebSphere MQ JMS Provider/MQQueue:'+ name +'/')
+	if len(QD) == 0 :
+		print "Queue does not exists .... "
+	else :
+		print "Queue exists, so removing old Queue ... "
+		AdminConfig.remove(QD)
+		print "Queue removed .. "
+	
+	print "Creating Queue Destination .. "
+	name1 = ["name" , name]
+	jndi = ["jndiName" , jndiname ]
+	qm = ["baseQueueManagerName", qmanager ]
+	queue = ["baseQueueName", queue_name ]
+	target = ["targetClient", target ]
+	qd_attr = [name1 , jndi , qm , queue , target ]
+	newqf = AdminConfig.create('MQQueue' , MS , qd_attr)
+	print "Queue Destination created .. "
+	
+	AdminConfig.save()
+	print " Saving Configuraion "
+	print " ----------------------------------------------------------------------------------------- "
+#--------------------------------------------------------------#
+
+## Full Syncronization ##
+print " Syncronizing configuration with Master Repository "
+nodelist = AdminTask.listManagedNodes().split(lineSep)
+for nodename in nodelist :
+	print " syncronizing nodes .......... "
+	####################Identifying the ConfigRepository MBean and assign it to variable######################
+	repo = AdminControl.completeObjectName('type=ConfigRepository,process=nodeagent,node='+ nodename +',*')
+	AdminControl.invoke(repo, 'refreshRepositoryEpoch')
+	sync = AdminControl.completeObjectName('cell='+ cell +',node='+ nodename +',type=NodeSync,*')
+	print AdminControl.invoke(sync , 'sync')
+	print " ----------------------------------------------------------------------------------------- "
+print " ----------------------------------------------------------------------------------------- "
+
+####################################################################################################################
+
+#main program starts here
+cluster = sys.argv[0]
+target = sys.argv[1]
+jndiname = sys.argv[2]
+queue_name = sys.argv[3]
+name=sys.argv[4]
+qmanager = sys.argv[5]
+
+QF(cluster,qmanager,jndiname,queue_name,target,name)
+---------------

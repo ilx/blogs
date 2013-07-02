@@ -1,0 +1,36 @@
+WebSphere Administration: Setting Heap Size
+===========================================
+
+From http://myarch.com/setting-heap-size :
+
+[source,python]
+---------------
+import sys
+
+"""
+Change JVM heap size for all application servers in a cell
+"""
+# New heap size is passed as a parameter to the script
+max_heap_size=sys.argv[0]
+
+# Get the string with config ids of all serves
+server_confids=AdminConfig.list("Server")
+# Iterate over all servers - config ids are separated by \n 
+for server_confid in server_confids.split("\n"):
+    server_confid=server_confid.strip()
+    # obtain the type - types are APPLICATION_SERVER, DEPLOYMENT_MANAGER, NODE_AGENT, WEB_SERVER
+    server_type=AdminConfig.showAttribute(server_confid, "serverType")
+    # we're changing the heap size for application servers - we want to exclude node agents, etc.
+    if server_type == "APPLICATION_SERVER":
+        server_name=AdminConfig.showAttribute(server_confid, "name")
+        # this is the query to get JavaVirtualMachine configuration object for a particular server
+        jvm_path="/Server:%s/JavaProcessDef:/JavaVirtualMachine:/" % server_name
+        jvm_confid=AdminConfig.getid(jvm_path)
+        # "modify" accepts  a list of lists - each list contains name and value (odd choice I must say, why not use tuples?)
+        AdminConfig.modify(jvm_confid, [["maximumHeapSize", max_heap_size]])
+
+# Commit our changes to the repository        
+AdminConfig.save()
+---------------
+
+

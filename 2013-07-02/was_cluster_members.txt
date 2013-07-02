@@ -1,0 +1,36 @@
+WebSphere Administration: Finding Cluster Members
+=================================================
+
+
+From http://myarch.com/finding-cluster-members:
+
+
+[source,python]
+---------------
+import sys
+
+"""
+List application servers that belong to a particular cluster
+Cluster name is passed as a parameter to the script
+"""
+cluster_name=sys.argv[0]
+
+# Get configID of the cluster
+cluster_conf_id = AdminConfig.getid("/ServerCluster:"+cluster_name )
+if not cluster_conf_id:
+    raise "Cluster %s does not exist!" % cluster_name
+
+# Get confids of the cluster members
+member_conf_ids = AdminConfig.showAttribute(cluster_conf_id, "members")
+# AdminConfig returns the list in [], get rid of the brackets
+member_conf_ids = member_conf_ids[1:-1]
+print "Cluster %s has following members:" % cluster_name  
+# split by space
+for member_conf_id in member_conf_ids.split():
+    # Obtain server name and node name
+    member_name=AdminConfig.showAttribute(member_conf_id, "memberName")
+    node_name=AdminConfig.showAttribute(member_conf_id, "nodeName")
+    print node_name+"/"+member_name
+---------------
+
+

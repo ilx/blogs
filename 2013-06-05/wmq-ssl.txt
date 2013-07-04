@@ -336,6 +336,10 @@ Reference
 * http://publib.boulder.ibm.com/infocenter/wmqv7/v7r0/topic/com.ibm.mq.amqzag.doc/fa16130_.htm[gsk7cmd,
   runmqckm, and gsk7capicmd commands]
 
+  * http://www-01.ibm.com/support/docview.wss?uid=swg21636093[2035
+    MQRC_NOT_AUTHORIZED Connecting to WebSphere MQ from WebSphere
+    Application Server via CLIENT Bindings]
+
 .NET:
 
 * http://publib.boulder.ibm.com/infocenter/wmqv7/v7r0/topic/com.ibm.mq.csqzav.doc/un10120_.htm[Using

@@ -1,0 +1,1125 @@
+<div style="color: #484848; font-family: 'Trebuchet MS', Helvetica, sans-serif">
+<h1>How to retrieve WAS ports using JMX</h1>
+<p>
+</p>
+<hr>
+<h2><a name="_problem"></a>Problem</h2>
+<p>We would like to "autodetect" ports that WebSphere Application Server
+uses. In order to do that we have to invoke WebSphere ConfigService
+MBean.</p>
+<p>Why? Let&#8217;s say that we have a topology that consists of:</p>
+<p>load balancer &#8594; IHS servers &#8594; frontend WAS servers &#8594; backend WAS
+servers</p>
+<p>Now, let us presume that backend servers are clustered, and there is
+more than one server per node. The only communication channel open
+from frotend servers to the backend servers is HTTPS.</p>
+<p>We would like to expose some kind of a service on the backend service,
+and invoke methods of that service either on one server or all
+available servers.</p>
+<p>In order to invoke service we could use RMI, but that&#8217;s not an option
+since we would need access to the backend servers RMI ports. "Simple"
+solution is to expose backend services using hessian or httpclient.
+Unfortunately, if we do that we need to tell frontend servers how to
+access backend servers - what&#8217;s their hostname and what port to use -
+we need WAS topology data.</p>
+<p>Later on we can save that data into database or expose it to our
+spring applications.</p>
+<hr>
+<h2><a name="_solution"></a>Solution</h2>
+<ul>
+<li>
+<p>
+Create service that will access websphere Config service:
+</p>
+</li>
+</ul>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">import</font></b> java<font color="#990000">.</font>util<font color="#990000">.</font>ArrayList<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> java<font color="#990000">.</font>util<font color="#990000">.</font>Collections<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> java<font color="#990000">.</font>util<font color="#990000">.</font>HashMap<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> java<font color="#990000">.</font>util<font color="#990000">.</font>List<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> java<font color="#990000">.</font>util<font color="#990000">.</font>Map<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> java<font color="#990000">.</font>util<font color="#990000">.</font>Properties<font color="#990000">;</font>
+
+<b><font color="#000080">import</font></b> javax<font color="#990000">.</font>management<font color="#990000">.</font>AttributeList<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> javax<font color="#990000">.</font>management<font color="#990000">.</font>ObjectName<font color="#990000">;</font>
+
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>slf4j<font color="#990000">.</font>Logger<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>slf4j<font color="#990000">.</font>LoggerFactory<font color="#990000">;</font>
+
+<b><font color="#000080">import</font></b> com<font color="#990000">.</font>ibm<font color="#990000">.</font>websphere<font color="#990000">.</font>management<font color="#990000">.</font>Session<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> com<font color="#990000">.</font>ibm<font color="#990000">.</font>websphere<font color="#990000">.</font>management<font color="#990000">.</font>configservice<font color="#990000">.</font>ConfigService<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> com<font color="#990000">.</font>ibm<font color="#990000">.</font>websphere<font color="#990000">.</font>management<font color="#990000">.</font>configservice<font color="#990000">.</font>ConfigServiceFactory<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> com<font color="#990000">.</font>ibm<font color="#990000">.</font>websphere<font color="#990000">.</font>management<font color="#990000">.</font>configservice<font color="#990000">.</font>ConfigServiceHelper<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> com<font color="#990000">.</font>ibm<font color="#990000">.</font>websphere<font color="#990000">.</font>management<font color="#990000">.</font>exception<font color="#990000">.</font>AdminException<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> com<font color="#990000">.</font>ibm<font color="#990000">.</font>websphere<font color="#990000">.</font>management<font color="#990000">.</font>exception<font color="#990000">.</font>ConfigServiceException<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> com<font color="#990000">.</font>ibm<font color="#990000">.</font>websphere<font color="#990000">.</font>management<font color="#990000">.</font>exception<font color="#990000">.</font>ConnectorException<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> com<font color="#990000">.</font>ibm<font color="#990000">.</font>websphere<font color="#990000">.</font>runtime<font color="#990000">.</font>ServerName<font color="#990000">;</font>
+
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">ServerConfigService</font> <font color="#FF0000">{</font>
+        <b><font color="#0000FF">private</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">Logger</font> LOG <font color="#990000">=</font> LoggerFactory<font color="#990000">.</font><b><font color="#000000">getLogger</font></b><font color="#990000">(</font>ServerConfigService<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+        <b><font color="#0000FF">private</font></b> <font color="#008080">ConfigService</font> configService <font color="#990000">=</font> <b><font color="#000000">getConfigService</font></b><font color="#990000">();</font>
+        <b><font color="#0000FF">private</font></b> <font color="#008080">String</font> serverFullName<font color="#990000">;</font>
+        <b><font color="#0000FF">private</font></b> <font color="#008080">String</font> nodeName<font color="#990000">;</font>
+        <b><font color="#0000FF">private</font></b> <font color="#008080">String</font> cellName<font color="#990000">;</font>
+
+        <b><font color="#0000FF">public</font></b> <b><font color="#000000">ServerConfigService</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+                serverFullName <font color="#990000">=</font> ServerName<font color="#990000">.</font><b><font color="#000000">getFullName</font></b><font color="#990000">();</font>
+                String<font color="#990000">[]</font> segments <font color="#990000">=</font> serverFullName<font color="#990000">.</font><b><font color="#000000">split</font></b><font color="#990000">(</font><font color="#FF0000">"</font><font color="#CC33CC">\\\\</font><font color="#FF0000">"</font><font color="#990000">);</font>
+                <i><font color="#9A1900">// node/cell/server</font></i>
+                <b><font color="#0000FF">if</font></b> <font color="#990000">(</font>segments<font color="#990000">.</font>length <font color="#990000">==</font> <font color="#993399">3</font><font color="#990000">)</font> <font color="#FF0000">{</font>
+                        cellName <font color="#990000">=</font> segments<font color="#990000">[</font><font color="#993399">0</font><font color="#990000">];</font>
+                        nodeName <font color="#990000">=</font> segments<font color="#990000">[</font><font color="#993399">1</font><font color="#990000">];</font>
+                <font color="#FF0000">}</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">public</font></b> <font color="#008080">String</font> <b><font color="#000000">getCurrentServerName</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+                <b><font color="#0000FF">return</font></b> ServerName<font color="#990000">.</font><b><font color="#000000">getDisplayName</font></b><font color="#990000">();</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">public</font></b> <font color="#008080">String</font> <b><font color="#000000">getCurrentServerFullName</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+                <b><font color="#0000FF">return</font></b> serverFullName<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">public</font></b> <font color="#008080">String</font> <b><font color="#000000">getNodeName</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+                <b><font color="#0000FF">return</font></b> nodeName<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">public</font></b> <font color="#008080">String</font> <b><font color="#000000">getCellName</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+                <b><font color="#0000FF">return</font></b> cellName<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">public</font></b> <font color="#008080">ServerInfo</font> <b><font color="#000000">getServerInfo</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+
+                <font color="#008080">ServerInfo</font> serverInfo <font color="#990000">=</font> ServerInfo<font color="#990000">.</font>EMPTY<font color="#990000">;</font>
+                <font color="#008080">Session</font> mgmtSession <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">Session</font></b><font color="#990000">();</font>
+                <b><font color="#0000FF">try</font></b> <font color="#FF0000">{</font>
+                        <font color="#008080">String</font> serverFullName <font color="#990000">=</font> <b><font color="#000000">getCurrentServerFullName</font></b><font color="#990000">();</font>
+                        LOG<font color="#990000">.</font><b><font color="#000000">trace</font></b><font color="#990000">(</font><font color="#FF0000">"fetching server info for: {}"</font><font color="#990000">,</font> serverFullName<font color="#990000">);</font>
+
+                        <font color="#008080">ObjectName</font> serverObjectName <font color="#990000">=</font> <b><font color="#000000">getServerObjectName</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">);</font>
+
+                        <font color="#008080">ObjectName</font> nodeObjectName <font color="#990000">=</font> <b><font color="#000000">getNodeObjectName</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">);</font>
+                        ObjectName<font color="#990000">[]</font> serverEntryObjectNames <font color="#990000">=</font> configService<font color="#990000">.</font><b><font color="#000000">resolve</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">,</font> nodeObjectName<font color="#990000">,</font> <font color="#FF0000">"ServerEntry="</font><font color="#990000">);</font>
+
+                        <font color="#008080">Map&lt;String,Endpoint&gt;</font> mapOfEndpoints <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> HashMap<font color="#990000">&lt;</font>String<font color="#990000">,</font> Endpoint<font color="#990000">&gt;();</font>
+                        <b><font color="#0000FF">for</font></b> <font color="#990000">(</font><font color="#008080">ObjectName</font> serverEntryON <font color="#990000">:</font> serverEntryObjectNames<font color="#990000">)</font> <font color="#FF0000">{</font>
+                                <font color="#008080">String</font> serverName <font color="#990000">=</font> <font color="#990000">(</font>String<font color="#990000">)</font>configService<font color="#990000">.</font><b><font color="#000000">getAttribute</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">,</font> serverEntryON<font color="#990000">,</font> <font color="#FF0000">"serverName"</font><font color="#990000">);</font>
+                                <b><font color="#0000FF">if</font></b> <font color="#990000">(</font><b><font color="#000000">getCurrentServerName</font></b><font color="#990000">().</font><b><font color="#000000">equals</font></b><font color="#990000">(</font>serverName<font color="#990000">))</font> <font color="#FF0000">{</font>
+                                        <font color="#008080">List&lt;AttributeList&gt;</font> specialEndpoints <font color="#990000">=</font> <font color="#990000">(</font>List<font color="#990000">&lt;</font>AttributeList<font color="#990000">&gt;)</font> configService<font color="#990000">.</font><b><font color="#000000">getAttribute</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">,</font> serverEntryON<font color="#990000">,</font> <font color="#FF0000">"specialEndpoints"</font><font color="#990000">);</font>
+                                        <b><font color="#0000FF">for</font></b> <font color="#990000">(</font><font color="#008080">AttributeList</font> specialEndpoint <font color="#990000">:</font> specialEndpoints<font color="#990000">)</font> <font color="#FF0000">{</font>
+                                                <font color="#008080">AttributeMap</font> specialEndpointMap <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">AttributeMap</font></b><font color="#990000">(</font>specialEndpoint<font color="#990000">);</font>
+                                                <font color="#008080">String</font> endPointName <font color="#990000">=</font> specialEndpointMap<font color="#990000">.</font><b><font color="#000000">get</font></b><font color="#990000">(</font><font color="#FF0000">"endPointName"</font><font color="#990000">,</font> String<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+                                                <font color="#008080">AttributeList</font> endpointAttributes <font color="#990000">=</font> specialEndpointMap<font color="#990000">.</font><b><font color="#000000">get</font></b><font color="#990000">(</font><font color="#FF0000">"endPoint"</font><font color="#990000">,</font> AttributeList<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+                                                <font color="#008080">AttributeMap</font> endpointMap <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">AttributeMap</font></b><font color="#990000">(</font>endpointAttributes<font color="#990000">);</font>
+                                                <font color="#008080">String</font> host <font color="#990000">=</font> endpointMap<font color="#990000">.</font><b><font color="#000000">get</font></b><font color="#990000">(</font><font color="#FF0000">"host"</font><font color="#990000">,</font> String<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+                                                <font color="#008080">Integer</font> port <font color="#990000">=</font> endpointMap<font color="#990000">.</font><b><font color="#000000">get</font></b><font color="#990000">(</font><font color="#FF0000">"port"</font><font color="#990000">,</font> Integer<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+                                                LOG<font color="#990000">.</font><b><font color="#000000">trace</font></b><font color="#990000">(</font><font color="#FF0000">"found endpoint {} on host {} and port {}"</font><font color="#990000">,</font> <b><font color="#0000FF">new</font></b> Object<font color="#990000">[]</font> <font color="#FF0000">{</font> endPointName<font color="#990000">,</font> host<font color="#990000">,</font> port<font color="#FF0000">}</font><font color="#990000">);</font>
+                                                <font color="#008080">Endpoint</font> endpoint <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">Endpoint</font></b><font color="#990000">();</font>
+                                                endpoint<font color="#990000">.</font>name <font color="#990000">=</font> endPointName<font color="#990000">;</font>
+                                                endpoint<font color="#990000">.</font>hostname <font color="#990000">=</font> host<font color="#990000">;</font>
+                                                endpoint<font color="#990000">.</font>port <font color="#990000">=</font> port<font color="#990000">;</font>
+                                                mapOfEndpoints<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>endpoint<font color="#990000">.</font>name<font color="#990000">,</font> endpoint<font color="#990000">);</font>
+                                        <font color="#FF0000">}</font>
+                                        LOG<font color="#990000">.</font><b><font color="#000000">trace</font></b><font color="#990000">(</font><font color="#FF0000">"fetched special endpoints"</font><font color="#990000">);</font>
+                                <font color="#FF0000">}</font>
+                        <font color="#FF0000">}</font>
+
+                        <font color="#008080">PortExtractorStrategy</font> portExtractorStrategy <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">PortExtractorStrategy</font></b><font color="#990000">();</font>
+                        serverInfo<font color="#990000">.</font>http_port <font color="#990000">=</font> portExtractorStrategy<font color="#990000">.</font><b><font color="#000000">getHttpPort</font></b><font color="#990000">(</font>mapOfEndpoints<font color="#990000">);</font>
+                        serverInfo<font color="#990000">.</font>https_port <font color="#990000">=</font> portExtractorStrategy<font color="#990000">.</font><b><font color="#000000">getHttpsPort</font></b><font color="#990000">(</font>mapOfEndpoints<font color="#990000">);</font>
+                        <font color="#008080">String</font> hostName <font color="#990000">=</font> <b><font color="#000000">retrieveHostName</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">,</font> <b><font color="#000000">getCurrentServerName</font></b><font color="#990000">());</font>
+                        serverInfo<font color="#990000">.</font>hostname <font color="#990000">=</font> hostName<font color="#990000">;</font>
+                        serverInfo<font color="#990000">.</font>serverName <font color="#990000">=</font> <b><font color="#000000">getCurrentServerName</font></b><font color="#990000">();</font>
+
+                        LOG<font color="#990000">.</font><b><font color="#000000">trace</font></b><font color="#990000">(</font><font color="#FF0000">"retrieved server entries"</font><font color="#990000">);</font>
+
+                <font color="#FF0000">}</font> <b><font color="#0000FF">catch</font></b> <font color="#990000">(</font><font color="#008080">Throwable</font> t<font color="#990000">)</font> <font color="#FF0000">{</font>
+                        <font color="#008080">String</font> msg <font color="#990000">=</font> <font color="#FF0000">"Unexpected error caught while retrieving information about WAS server."</font><font color="#990000">;</font>
+                        LOG<font color="#990000">.</font><b><font color="#000000">error</font></b><font color="#990000">(</font>msg<font color="#990000">,</font> t<font color="#990000">);</font>
+                        <b><font color="#0000FF">throw</font></b> <b><font color="#0000FF">new</font></b> <b><font color="#000000">IllegalStateException</font></b><font color="#990000">(</font>msg<font color="#990000">,</font> t<font color="#990000">);</font>
+                <font color="#FF0000">}</font>
+                <b><font color="#0000FF">finally</font></b> <font color="#FF0000">{</font>
+                        <b><font color="#000000">discard</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">);</font>
+                <font color="#FF0000">}</font>
+
+                <b><font color="#0000FF">return</font></b> serverInfo<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#008080">String</font> <b><font color="#000000">retrieveHostName</font></b><font color="#990000">(</font><font color="#008080">Session</font> mgmtSession<font color="#990000">,</font> <font color="#008080">String</font> targetServerName<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <font color="#008080">String</font> hostname <font color="#990000">=</font> <b><font color="#0000FF">null</font></b><font color="#990000">;</font>
+                <font color="#008080">ObjectName</font> nodeObjectName <font color="#990000">=</font> <b><font color="#000000">getNodeObjectName</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">);</font>
+                <b><font color="#0000FF">try</font></b> <font color="#FF0000">{</font>
+                        ObjectName<font color="#990000">[]</font> serverIndexes <font color="#990000">=</font> configService<font color="#990000">.</font><b><font color="#000000">resolve</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">,</font> nodeObjectName<font color="#990000">,</font> <font color="#FF0000">"ServerIndex="</font><font color="#990000">);</font>
+                        <b><font color="#0000FF">for</font></b> <font color="#990000">(</font><font color="#008080">ObjectName</font> serverIndexON <font color="#990000">:</font> serverIndexes<font color="#990000">)</font> <font color="#FF0000">{</font>
+                                <font color="#008080">List&lt;AttributeList&gt;</font> serverEntries <font color="#990000">=</font> <font color="#990000">(</font>List<font color="#990000">&lt;</font>AttributeList<font color="#990000">&gt;)</font> configService<font color="#990000">.</font><b><font color="#000000">getAttribute</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">,</font> serverIndexON<font color="#990000">,</font> <font color="#FF0000">"serverEntries"</font><font color="#990000">);</font>
+                                <b><font color="#0000FF">for</font></b> <font color="#990000">(</font><font color="#008080">AttributeList</font> serverEntryAtrs <font color="#990000">:</font> serverEntries<font color="#990000">)</font> <font color="#FF0000">{</font>
+                                        <font color="#008080">AttributeMap</font> serverEntryMap <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">AttributeMap</font></b><font color="#990000">(</font>serverEntryAtrs<font color="#990000">);</font>
+                                        <font color="#008080">String</font> serverName <font color="#990000">=</font> serverEntryMap<font color="#990000">.</font><b><font color="#000000">get</font></b><font color="#990000">(</font><font color="#FF0000">"serverName"</font><font color="#990000">,</font> String<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+                                        <b><font color="#0000FF">if</font></b> <font color="#990000">(</font>targetServerName<font color="#990000">.</font><b><font color="#000000">equals</font></b><font color="#990000">(</font>serverName<font color="#990000">))</font> <font color="#FF0000">{</font>
+                                                hostname <font color="#990000">=</font> <font color="#990000">(</font>String<font color="#990000">)</font> configService<font color="#990000">.</font><b><font color="#000000">getAttribute</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">,</font> serverIndexON<font color="#990000">,</font> <font color="#FF0000">"hostName"</font><font color="#990000">);</font>
+                                                <b><font color="#0000FF">break</font></b><font color="#990000">;</font>
+                                        <font color="#FF0000">}</font>
+                                <font color="#FF0000">}</font>
+                        <font color="#FF0000">}</font>
+                <font color="#FF0000">}</font> <b><font color="#0000FF">catch</font></b> <font color="#990000">(</font><font color="#008080">Throwable</font> t<font color="#990000">)</font> <font color="#FF0000">{</font>
+                        <b><font color="#0000FF">throw</font></b> <b><font color="#0000FF">new</font></b> <b><font color="#000000">IllegalStateException</font></b><font color="#990000">(</font><font color="#FF0000">"Unable to resolve hostname"</font><font color="#990000">,</font> t<font color="#990000">);</font>
+                <font color="#FF0000">}</font>
+
+                <b><font color="#0000FF">return</font></b> hostname<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#008080">String</font> <b><font color="#000000">getVirtualHostForApplication</font></b><font color="#990000">(</font><font color="#008080">String</font> applicationName<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <font color="#008080">String</font> result <font color="#990000">=</font> <b><font color="#0000FF">null</font></b><font color="#990000">;</font>
+                <b><font color="#0000FF">throw</font></b> <b><font color="#0000FF">new</font></b> <b><font color="#000000">UnsupportedOperationException</font></b><font color="#990000">(</font><font color="#FF0000">"getVirtualHostForApplication not implemented"</font><font color="#990000">);</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#008080">ObjectName</font> <b><font color="#000000">getCellObjectName</font></b><font color="#990000">(</font><font color="#008080">Session</font> mgmtSession<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <font color="#008080">String</font> cellPath <font color="#990000">=</font> String<font color="#990000">.</font><b><font color="#000000">format</font></b><font color="#990000">(</font><font color="#FF0000">"Cell=%s"</font><font color="#990000">,</font> cellName<font color="#990000">);</font>
+                <b><font color="#0000FF">return</font></b> <b><font color="#000000">getObjectName</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">,</font>cellPath<font color="#990000">);</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#008080">ObjectName</font> <b><font color="#000000">getNodeObjectName</font></b><font color="#990000">(</font><font color="#008080">Session</font> mgmtSession<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <font color="#008080">String</font> containmentPath <font color="#990000">=</font> String<font color="#990000">.</font><b><font color="#000000">format</font></b><font color="#990000">(</font><font color="#FF0000">"Cell=%s:Node=%s"</font><font color="#990000">,</font> <b><font color="#000000">getCellName</font></b><font color="#990000">(),</font> <b><font color="#000000">getNodeName</font></b><font color="#990000">());</font>
+                <b><font color="#0000FF">return</font></b> <b><font color="#000000">getObjectName</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">,</font>containmentPath<font color="#990000">);</font>
+
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#008080">ObjectName</font> <b><font color="#000000">getServerObjectName</font></b><font color="#990000">(</font><font color="#008080">Session</font> mgmtSession<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <font color="#008080">String</font> containmentPath <font color="#990000">=</font> String<font color="#990000">.</font><b><font color="#000000">format</font></b><font color="#990000">(</font><font color="#FF0000">"Cell=%s:Node=%s:Server=%s"</font><font color="#990000">,</font> <b><font color="#000000">getCellName</font></b><font color="#990000">(),</font> <b><font color="#000000">getNodeName</font></b><font color="#990000">(),</font> <b><font color="#000000">getCurrentServerName</font></b><font color="#990000">());</font>
+                <b><font color="#0000FF">return</font></b> <b><font color="#000000">getObjectName</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">,</font> containmentPath<font color="#990000">);</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#008080">ObjectName</font> <b><font color="#000000">getObjectName</font></b><font color="#990000">(</font><font color="#008080">Session</font> mgmtSession<font color="#990000">,</font> <font color="#008080">String</font> containmentPath<font color="#990000">)</font> <font color="#FF0000">{</font>
+                ObjectName<font color="#990000">[]</font> objectNames <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> ObjectName<font color="#990000">[</font><font color="#993399">0</font><font color="#990000">];</font>
+                <b><font color="#0000FF">try</font></b> <font color="#FF0000">{</font>
+                        objectNames <font color="#990000">=</font> configService<font color="#990000">.</font><b><font color="#000000">resolve</font></b><font color="#990000">(</font>mgmtSession<font color="#990000">,</font> containmentPath<font color="#990000">);</font>
+                <font color="#FF0000">}</font> <b><font color="#0000FF">catch</font></b> <font color="#990000">(</font><font color="#008080">Throwable</font> t<font color="#990000">)</font> <font color="#FF0000">{</font>
+                        <font color="#008080">String</font> msg <font color="#990000">=</font> String<font color="#990000">.</font><b><font color="#000000">format</font></b><font color="#990000">(</font><font color="#FF0000">"Unable to resolve object with path '%s'"</font><font color="#990000">,</font> containmentPath<font color="#990000">);</font>
+                        <b><font color="#0000FF">throw</font></b> <b><font color="#0000FF">new</font></b> <b><font color="#000000">IllegalStateException</font></b><font color="#990000">(</font>msg<font color="#990000">,</font> t<font color="#990000">);</font>
+                <font color="#FF0000">}</font>
+
+                <b><font color="#0000FF">if</font></b> <font color="#990000">(</font>objectNames<font color="#990000">.</font>length <font color="#990000">!=</font> <font color="#993399">1</font><font color="#990000">)</font> <font color="#FF0000">{</font>
+                        <b><font color="#0000FF">throw</font></b> <b><font color="#0000FF">new</font></b> <b><font color="#000000">IllegalStateException</font></b><font color="#990000">(</font>String<font color="#990000">.</font><b><font color="#000000">format</font></b><font color="#990000">(</font><font color="#FF0000">"Unable to find exactly one object with containment path '%s'"</font><font color="#990000">,</font> containmentPath<font color="#990000">));</font>
+                <font color="#FF0000">}</font>
+                <font color="#008080">ObjectName</font> requestedObjectName <font color="#990000">=</font> objectNames<font color="#990000">[</font><font color="#993399">0</font><font color="#990000">];</font>
+
+                <b><font color="#0000FF">return</font></b> requestedObjectName<font color="#990000">;</font>
+
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#009900">void</font> <b><font color="#000000">discard</font></b><font color="#990000">(</font><font color="#008080">Session</font> session<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <b><font color="#0000FF">try</font></b> <font color="#FF0000">{</font>
+                        configService<font color="#990000">.</font><b><font color="#000000">discard</font></b><font color="#990000">(</font>session<font color="#990000">);</font>
+                <font color="#FF0000">}</font> <b><font color="#0000FF">catch</font></b> <font color="#990000">(</font><font color="#008080">Throwable</font> e<font color="#990000">)</font> <font color="#FF0000">{</font>
+                        LOG<font color="#990000">.</font><b><font color="#000000">error</font></b><font color="#990000">(</font><font color="#FF0000">"Unable to discard management session"</font><font color="#990000">,</font> e<font color="#990000">);</font>
+                <font color="#FF0000">}</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#008080">ConfigService</font> <b><font color="#000000">getConfigService</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+                <font color="#008080">ConfigService</font> cs <font color="#990000">=</font> <b><font color="#0000FF">null</font></b><font color="#990000">;</font>
+                <b><font color="#0000FF">try</font></b> <font color="#FF0000">{</font>
+                        cs <font color="#990000">=</font> ConfigServiceFactory<font color="#990000">.</font><b><font color="#000000">getConfigService</font></b><font color="#990000">();</font>
+                        <b><font color="#0000FF">if</font></b> <font color="#990000">(</font>cs <font color="#990000">==</font> <b><font color="#0000FF">null</font></b><font color="#990000">)</font> <font color="#FF0000">{</font>
+                                <font color="#008080">Properties</font> prop <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">Properties</font></b><font color="#990000">();</font>
+                                prop<font color="#990000">.</font><b><font color="#000000">setProperty</font></b><font color="#990000">(</font><font color="#FF0000">"location"</font><font color="#990000">,</font> <font color="#FF0000">"local"</font><font color="#990000">);</font>
+                                cs <font color="#990000">=</font> ConfigServiceFactory<font color="#990000">.</font><b><font color="#000000">createConfigService</font></b><font color="#990000">(</font><b><font color="#0000FF">true</font></b><font color="#990000">,</font> prop<font color="#990000">);</font>
+                        <font color="#FF0000">}</font>
+                <font color="#FF0000">}</font>
+                <b><font color="#0000FF">catch</font></b> <font color="#990000">(</font><font color="#008080">AdminException</font> e<font color="#990000">)</font> <font color="#FF0000">{</font>
+                        <font color="#008080">String</font> msg <font color="#990000">=</font> <font color="#FF0000">"Unable to create ConfigService."</font><font color="#990000">;</font>
+                        LOG<font color="#990000">.</font><b><font color="#000000">error</font></b><font color="#990000">(</font>msg<font color="#990000">,</font> e<font color="#990000">);</font>
+                        <b><font color="#0000FF">throw</font></b> <b><font color="#0000FF">new</font></b> <b><font color="#000000">IllegalStateException</font></b><font color="#990000">(</font>msg<font color="#990000">,</font> e<font color="#990000">);</font>
+                <font color="#FF0000">}</font>
+                <b><font color="#0000FF">return</font></b> cs<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<ul>
+<li>
+<p>
+Create utility classes (Endpoint, ServerInfo, AttributeMap,
+  WAS8Endpoints, PortExtractorStrategy):
+</p>
+</li>
+</ul>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">Endpoint</font> <font color="#FF0000">{</font>
+        <b><font color="#0000FF">public</font></b> <font color="#008080">String</font> name<font color="#990000">;</font>
+        <b><font color="#0000FF">public</font></b> <font color="#008080">String</font> hostname<font color="#990000">;</font>
+        <b><font color="#0000FF">public</font></b> <font color="#008080">Integer</font> port<font color="#990000">;</font>
+
+        @Override
+        <b><font color="#0000FF">public</font></b> <font color="#008080">String</font> <b><font color="#000000">toString</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+                <font color="#008080">StringBuilder</font> builder <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">StringBuilder</font></b><font color="#990000">();</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font><font color="#FF0000">"Endpoint [name="</font><font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font>name<font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font><font color="#FF0000">", hostname="</font><font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font>hostname<font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font><font color="#FF0000">", port="</font><font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font>port<font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font><font color="#FF0000">"]"</font><font color="#990000">);</font>
+                <b><font color="#0000FF">return</font></b> builder<font color="#990000">.</font><b><font color="#000000">toString</font></b><font color="#990000">();</font>
+        <font color="#FF0000">}</font>
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">ServerInfo</font> <font color="#FF0000">{</font>
+        <b><font color="#0000FF">public</font></b> <font color="#008080">String</font> serverName<font color="#990000">;</font>
+        <b><font color="#0000FF">public</font></b> <font color="#008080">String</font> hostname<font color="#990000">;</font>
+        <b><font color="#0000FF">public</font></b> <font color="#008080">Integer</font> http_port<font color="#990000">;</font>
+        <b><font color="#0000FF">public</font></b> <font color="#008080">Integer</font> https_port<font color="#990000">;</font>
+
+        <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">static</font></b> <font color="#008080">ServerInfo</font> EMPTY <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">ServerInfo</font></b><font color="#990000">();</font>
+
+        @Override
+        <b><font color="#0000FF">public</font></b> <font color="#008080">String</font> <b><font color="#000000">toString</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+                <font color="#008080">StringBuilder</font> builder <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">StringBuilder</font></b><font color="#990000">();</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font><font color="#FF0000">"ServerInfo [serverName="</font><font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font>serverName<font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font><font color="#FF0000">", hostname="</font><font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font>hostname<font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font><font color="#FF0000">", http_port="</font><font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font>http_port<font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font><font color="#FF0000">", https_port="</font><font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font>https_port<font color="#990000">);</font>
+                builder<font color="#990000">.</font><b><font color="#000000">append</font></b><font color="#990000">(</font><font color="#FF0000">"]"</font><font color="#990000">);</font>
+                <b><font color="#0000FF">return</font></b> builder<font color="#990000">.</font><b><font color="#000000">toString</font></b><font color="#990000">();</font>
+        <font color="#FF0000">}</font>
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">import</font></b> java<font color="#990000">.</font>util<font color="#990000">.</font>HashMap<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> java<font color="#990000">.</font>util<font color="#990000">.</font>List<font color="#990000">;</font>
+
+<b><font color="#000080">import</font></b> javax<font color="#990000">.</font>management<font color="#990000">.</font>Attribute<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> javax<font color="#990000">.</font>management<font color="#990000">.</font>AttributeList<font color="#990000">;</font>
+
+
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">AttributeMap</font> <b><font color="#0000FF">extends</font></b> HashMap<font color="#990000">&lt;</font>String<font color="#990000">,</font> Object<font color="#990000">&gt;</font> <font color="#FF0000">{</font>
+
+        <b><font color="#0000FF">private</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#009900">long</font> serialVersionUID <font color="#990000">=</font> <font color="#993399">1L</font><font color="#990000">;</font>
+
+        <b><font color="#0000FF">public</font></b> <b><font color="#000000">AttributeMap</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+                <i><font color="#9A1900">// nothing</font></i>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">public</font></b> <b><font color="#000000">AttributeMap</font></b><font color="#990000">(</font><font color="#008080">AttributeList</font> attributeList<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <b><font color="#000000">convertAttributeListToAttributeMap</font></b><font color="#990000">(</font>attributeList<font color="#990000">);</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#009900">void</font> <b><font color="#000000">convertAttributeListToAttributeMap</font></b><font color="#990000">(</font><font color="#008080">AttributeList</font> attributeList<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <font color="#008080">List&lt;Attribute&gt;</font> listOfAttributes <font color="#990000">=</font> attributeList<font color="#990000">.</font><b><font color="#000000">asList</font></b><font color="#990000">();</font>
+                <b><font color="#0000FF">for</font></b> <font color="#990000">(</font><font color="#008080">Attribute</font> attribute <font color="#990000">:</font> listOfAttributes<font color="#990000">)</font> <font color="#FF0000">{</font>
+                        <font color="#008080">String</font> name <font color="#990000">=</font> attribute<font color="#990000">.</font><b><font color="#000000">getName</font></b><font color="#990000">();</font>
+                        <font color="#008080">Object</font> value <font color="#990000">=</font> attribute<font color="#990000">.</font><b><font color="#000000">getValue</font></b><font color="#990000">();</font>
+                        <b><font color="#0000FF">this</font></b><font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>name<font color="#990000">,</font> value<font color="#990000">);</font>
+                <font color="#FF0000">}</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">public</font></b> <font color="#990000">&lt;</font>T<font color="#990000">&gt;</font> <font color="#008080">T</font> <b><font color="#000000">get</font></b><font color="#990000">(</font><font color="#008080">String</font> key<font color="#990000">,</font> <font color="#008080">Class&lt;T&gt;</font> type<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <b><font color="#0000FF">return</font></b> type<font color="#990000">.</font><b><font color="#000000">cast</font></b><font color="#990000">(</font><b><font color="#000000">get</font></b><font color="#990000">(</font>key<font color="#990000">));</font>
+        <font color="#FF0000">}</font>
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><font color="#008080">enum</font> WAS8Endpoints <font color="#FF0000">{</font>
+        BOOTSTRAP_ADDRESS<font color="#990000">,</font>
+        SOAP_CONNECTOR_ADDRESS<font color="#990000">,</font>
+        ORB_LISTENER_ADDRESS<font color="#990000">,</font>
+        WC_adminhost<font color="#990000">,</font>
+        WC_defaulthost<font color="#990000">,</font>
+        WC_adminhost_secure<font color="#990000">,</font>
+        WC_defaulthost_secure<font color="#990000">,</font>
+        IPC_CONNECTOR_ADDRESS
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">import</font></b> java<font color="#990000">.</font>util<font color="#990000">.</font>Map<font color="#990000">;</font>
+
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">PortExtractorStrategy</font> <font color="#FF0000">{</font>
+
+        <b><font color="#0000FF">public</font></b> <font color="#008080">Integer</font> <b><font color="#000000">getHttpPort</font></b><font color="#990000">(</font><font color="#008080">Map&lt;String, Endpoint&gt;</font> endpointMap<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <font color="#008080">Endpoint</font> endpoint <font color="#990000">=</font> endpointMap<font color="#990000">.</font><b><font color="#000000">get</font></b><font color="#990000">(</font>WAS8Endpoints<font color="#990000">.</font>WC_defaulthost<font color="#990000">.</font><b><font color="#000000">name</font></b><font color="#990000">());</font>
+                <font color="#008080">Integer</font> port <font color="#990000">=</font> <font color="#990000">(</font>endpoint <font color="#990000">!=</font> <b><font color="#0000FF">null</font></b> <font color="#990000">?</font> endpoint<font color="#990000">.</font>port <font color="#990000">:</font> <font color="#990000">-</font><font color="#993399">1</font> <font color="#990000">);</font>
+                <b><font color="#0000FF">return</font></b> port<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">public</font></b> <font color="#008080">Integer</font> <b><font color="#000000">getHttpsPort</font></b><font color="#990000">(</font><font color="#008080">Map&lt;String, Endpoint&gt;</font> endpointMap<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <font color="#008080">Endpoint</font> endpoint <font color="#990000">=</font> endpointMap<font color="#990000">.</font><b><font color="#000000">get</font></b><font color="#990000">(</font>WAS8Endpoints<font color="#990000">.</font>WC_defaulthost_secure<font color="#990000">.</font><b><font color="#000000">name</font></b><font color="#990000">());</font>
+                <font color="#008080">Integer</font> port <font color="#990000">=</font> <font color="#990000">(</font>endpoint <font color="#990000">!=</font> <b><font color="#0000FF">null</font></b> <font color="#990000">?</font> endpoint<font color="#990000">.</font>port <font color="#990000">:</font> <font color="#990000">-</font><font color="#993399">1</font><font color="#990000">)</font> <font color="#990000">;</font>
+                <b><font color="#0000FF">return</font></b> port<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<p>Now you can use ServerConfigService to retrieve websphere
+configuration data like HTTP or HTTPS ports. Please note that in order
+to invoke ConfigService MBean you need access rights.  You have to
+invoke MBean operations with proper privilages - you have to log in to
+your app as a user that has monitoring right on WAS! How to do that is
+out of the scope of this article.</p>
+<p>Fortunately, there is a point in app lifecycle where you don&#8217;t need
+those rights but still you can access ConfigService.
+If you invoke ServerConfigService during application startup you don&#8217;t
+have to be logged in. So, simply implement servelet context listener
+and invoke ServerConfigService from listener&#8230;</p>
+<p>Or, if you use Spring, implement your own
+ApplicationContextInitializer.</p>
+<hr>
+<h2><a name="_exposing_retrieved_data_to_spring_apps"></a>Exposing retrieved data to spring apps</h2>
+<ul>
+<li>
+<p>
+Create spring application context initializer that will retrieve WAS
+  metadata and make it available trough spring environment (in other
+  or you can access those environment entries from Java config using
+  env.getProperty("CellName")):
+</p>
+</li>
+</ul>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">import</font></b> java<font color="#990000">.</font>util<font color="#990000">.</font>HashMap<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> java<font color="#990000">.</font>util<font color="#990000">.</font>Map<font color="#990000">;</font>
+
+<b><font color="#000080">import</font></b> javax<font color="#990000">.</font>servlet<font color="#990000">.</font>ServletContext<font color="#990000">;</font>
+
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>ApplicationContextInitializer<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>core<font color="#990000">.</font>env<font color="#990000">.</font>ConfigurableEnvironment<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>core<font color="#990000">.</font>env<font color="#990000">.</font>Environment<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>core<font color="#990000">.</font>env<font color="#990000">.</font>MapPropertySource<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>core<font color="#990000">.</font>env<font color="#990000">.</font>MutablePropertySources<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>core<font color="#990000">.</font>env<font color="#990000">.</font>PropertySource<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>web<font color="#990000">.</font>context<font color="#990000">.</font>ConfigurableWebApplicationContext<font color="#990000">;</font>
+
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">WebsphereEnvironmentAwareApplicationContextInitializer</font> <b><font color="#0000FF">implements</font></b> ApplicationContextInitializer<font color="#990000">&lt;</font>ConfigurableWebApplicationContext<font color="#990000">&gt;</font> <font color="#FF0000">{</font>
+
+    @Override
+    <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">initialize</font></b><font color="#990000">(</font><b><font color="#0000FF">final</font></b> <font color="#008080">ConfigurableWebApplicationContext</font> applicationContext<font color="#990000">)</font> <font color="#FF0000">{</font>
+
+        <font color="#008080">Environment</font> environment <font color="#990000">=</font> applicationContext<font color="#990000">.</font><b><font color="#000000">getEnvironment</font></b><font color="#990000">();</font>
+        <b><font color="#0000FF">if</font></b> <font color="#990000">(</font>environment <font color="#008080">instanceof</font> ConfigurableEnvironment<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <font color="#008080">ConfigurableEnvironment</font> confEnv <font color="#990000">=</font> ConfigurableEnvironment<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">.</font><b><font color="#000000">cast</font></b><font color="#990000">(</font>environment<font color="#990000">);</font>
+                <font color="#008080">MutablePropertySources</font> propertySources <font color="#990000">=</font> confEnv<font color="#990000">.</font><b><font color="#000000">getPropertySources</font></b><font color="#990000">();</font>
+
+                <font color="#008080">Map&lt;String, Object&gt;</font> wasInfoMap <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> HashMap<font color="#990000">&lt;</font>String<font color="#990000">,</font> Object<font color="#990000">&gt;();</font>
+                <b><font color="#000000">loadWasProps</font></b><font color="#990000">(</font>wasInfoMap<font color="#990000">);</font>
+
+                <font color="#008080">ServletContext</font> servletContext <font color="#990000">=</font> applicationContext<font color="#990000">.</font><b><font color="#000000">getServletContext</font></b><font color="#990000">();</font>
+                <font color="#008080">String</font> contextRoot <font color="#990000">=</font> servletContext<font color="#990000">.</font><b><font color="#000000">getContextPath</font></b><font color="#990000">();</font>
+                wasInfoMap<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>WebsphereProperty<font color="#990000">.</font>ContextRoot<font color="#990000">.</font><b><font color="#000000">name</font></b><font color="#990000">(),</font> contextRoot<font color="#990000">);</font>
+
+                <font color="#008080">PropertySource&lt;?&gt;</font> wasPropertySource <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">MapPropertySource</font></b><font color="#990000">(</font><font color="#FF0000">"websphere-server-info-map"</font><font color="#990000">,</font> wasInfoMap<font color="#990000">);</font>
+                propertySources<font color="#990000">.</font><b><font color="#000000">addFirst</font></b><font color="#990000">(</font>wasPropertySource<font color="#990000">);</font>
+        <font color="#FF0000">}</font>
+    <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#009900">void</font> <b><font color="#000000">loadWasProps</font></b><font color="#990000">(</font><font color="#008080">Map&lt;String, Object&gt;</font> wasInfoMap<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <font color="#008080">ServerConfigService</font> service <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">ServerConfigService</font></b><font color="#990000">();</font>
+                <font color="#008080">String</font> cellName <font color="#990000">=</font> service<font color="#990000">.</font><b><font color="#000000">getCellName</font></b><font color="#990000">();</font>
+                <font color="#008080">String</font> nodeName <font color="#990000">=</font> service<font color="#990000">.</font><b><font color="#000000">getNodeName</font></b><font color="#990000">();</font>
+                <font color="#008080">String</font> currentServerName <font color="#990000">=</font> service<font color="#990000">.</font><b><font color="#000000">getCurrentServerName</font></b><font color="#990000">();</font>
+
+                <font color="#008080">ServerInfo</font> serverInfo <font color="#990000">=</font> service<font color="#990000">.</font><b><font color="#000000">getServerInfo</font></b><font color="#990000">();</font>
+
+                wasInfoMap<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>WebsphereProperty<font color="#990000">.</font>CellName<font color="#990000">.</font><b><font color="#000000">name</font></b><font color="#990000">(),</font> cellName<font color="#990000">);</font>
+                wasInfoMap<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>WebsphereProperty<font color="#990000">.</font>NodeName<font color="#990000">.</font><b><font color="#000000">name</font></b><font color="#990000">(),</font> nodeName<font color="#990000">);</font>
+                wasInfoMap<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>WebsphereProperty<font color="#990000">.</font>ServerName<font color="#990000">.</font><b><font color="#000000">name</font></b><font color="#990000">(),</font> currentServerName<font color="#990000">);</font>
+
+                wasInfoMap<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>WebsphereProperty<font color="#990000">.</font>HostName<font color="#990000">.</font><b><font color="#000000">name</font></b><font color="#990000">(),</font> serverInfo<font color="#990000">.</font>hostname<font color="#990000">);</font>
+                wasInfoMap<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>WebsphereProperty<font color="#990000">.</font>WC_defaulthost<font color="#990000">.</font><b><font color="#000000">name</font></b><font color="#990000">(),</font> serverInfo<font color="#990000">.</font>http_port<font color="#990000">);</font>
+                wasInfoMap<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>WebsphereProperty<font color="#990000">.</font>WC_defaulthost_secure<font color="#990000">.</font><b><font color="#000000">name</font></b><font color="#990000">(),</font> serverInfo<font color="#990000">.</font>https_port<font color="#990000">);</font>
+
+        <font color="#FF0000">}</font>
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<ul>
+<li>
+<p>
+utilty enum:
+</p>
+</li>
+</ul>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#0000FF">public</font></b> <font color="#008080">enum</font> WebsphereProperty <font color="#FF0000">{</font>
+        CellName<font color="#990000">,</font>
+        NodeName<font color="#990000">,</font>
+        ServerName<font color="#990000">,</font>
+        HostName<font color="#990000">,</font>
+        WC_defaulthost<font color="#990000">,</font>
+        WC_defaulthost_secure<font color="#990000">,</font>
+        ContextRoot
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<ul>
+<li>
+<p>
+declare application initializer in web.xml:
+</p>
+</li>
+</ul>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">&lt;?xml</font></b> <font color="#009900">version</font><font color="#990000">=</font><font color="#FF0000">"1.0"</font> <font color="#009900">encoding</font><font color="#990000">=</font><font color="#FF0000">"UTF-8"</font><b><font color="#000080">?&gt;</font></b>
+<b><font color="#0000FF">&lt;web-app</font></b> <font color="#009900">id</font><font color="#990000">=</font><font color="#FF0000">"WebApp_ID"</font> <font color="#009900">version</font><font color="#990000">=</font><font color="#FF0000">"3.0"</font> <font color="#009900">xmlns</font><font color="#990000">=</font><font color="#FF0000">"http://java.sun.com/xml/ns/javaee"</font> <font color="#009900">xmlns:xsi</font><font color="#990000">=</font><font color="#FF0000">"http://www.w3.org/2001/XMLSchema-instance"</font>
+        <font color="#009900">xsi:schemaLocation</font><font color="#990000">=</font><font color="#FF0000">"http://java.sun.com/xml/ns/javaee http://java.sun.com/xml/ns/javaee/web-app_3_0.xsd"</font> <font color="#009900">metadata-complete</font><font color="#990000">=</font><font color="#FF0000">"true"</font><b><font color="#0000FF">&gt;</font></b>
+
+<i><font color="#9A1900">&lt;!-- ... --&gt;</font></i>
+        <b><font color="#0000FF">&lt;listener&gt;</font></b>
+                <b><font color="#0000FF">&lt;listener-class&gt;</font></b>org.springframework.web.context.ContextLoaderListener<b><font color="#0000FF">&lt;/listener-class&gt;</font></b>
+        <b><font color="#0000FF">&lt;/listener&gt;</font></b>
+
+        <b><font color="#0000FF">&lt;context-param&gt;</font></b>
+                <b><font color="#0000FF">&lt;param-name&gt;</font></b>contextInitializerClasses<b><font color="#0000FF">&lt;/param-name&gt;</font></b>
+                <b><font color="#0000FF">&lt;param-value&gt;</font></b>EnvironmentAwareApplicationContextInitializer, WebsphereEnvironmentAwareApplicationContextInitializer<b><font color="#0000FF">&lt;/param-value&gt;</font></b>
+        <b><font color="#0000FF">&lt;/context-param&gt;</font></b>
+<i><font color="#9A1900">&lt;!-- ... --&gt;</font></i></tt></pre></td></tr></table>
+<hr>
+<h2><a name="_saving_retrieved_data_to_the_database"></a>Saving retrieved data to the database</h2>
+<p>I won&#8217;t provide complete source code  here, but general idea is to
+declare spring ApplicationListener and save data to the database. You
+can use spring services (and DAOs) in ApplicationListener to store
+application metadata.</p>
+<ul>
+<li>
+<p>
+in spring java configuration you can reference values previously
+  storeg into spring environment:
+</p>
+</li>
+</ul>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">import</font></b> javax<font color="#990000">.</font>sql<font color="#990000">.</font>DataSource<font color="#990000">;</font>
+
+
+<font color="#990000">....</font>
+
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>beans<font color="#990000">.</font>factory<font color="#990000">.</font>annotation<font color="#990000">.</font>Autowired<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>beans<font color="#990000">.</font>factory<font color="#990000">.</font>annotation<font color="#990000">.</font>Qualifier<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>beans<font color="#990000">.</font>factory<font color="#990000">.</font>annotation<font color="#990000">.</font>Value<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>ApplicationListener<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>annotation<font color="#990000">.</font>Bean<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>annotation<font color="#990000">.</font>Configuration<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>event<font color="#990000">.</font>ApplicationContextEvent<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>core<font color="#990000">.</font>env<font color="#990000">.</font>Environment<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>web<font color="#990000">.</font>util<font color="#990000">.</font>UriComponentsBuilder<font color="#990000">;</font>
+
+<i><font color="#9A1900">/**</font></i>
+<i><font color="#9A1900"> * Writes configuration data for currently running application into database.</font></i>
+<i><font color="#9A1900"> *</font></i>
+<i><font color="#9A1900"> * </font></i><font color="#009900">@author</font><i><font color="#9A1900"> ilonca</font></i>
+<i><font color="#9A1900"> */</font></i>
+@Configuration
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">ApplicationLifecycleConfiguration</font> <font color="#FF0000">{</font>
+
+        <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> DS <font color="#990000">=</font> <font color="#FF0000">"DBDS"</font><font color="#990000">;</font>
+        <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> BEAN_APPLICATION_DAO <font color="#990000">=</font> <font color="#FF0000">"applicationDAO"</font><font color="#990000">;</font>
+
+        @Autowired
+        <b><font color="#0000FF">private</font></b> <font color="#008080">Environment</font> env<font color="#990000">;</font>
+
+        @Autowired
+        @<b><font color="#000000">Qualifier</font></b><font color="#990000">(</font>DS<font color="#990000">)</font>
+        <b><font color="#0000FF">private</font></b> <font color="#008080">DataSource</font> appDs<font color="#990000">;</font>
+
+        @Autowired
+        <b><font color="#0000FF">private</font></b> <font color="#008080">ApplicationDAO</font> applicationDao<font color="#990000">;</font>
+
+        @Autowired
+        <b><font color="#0000FF">private</font></b> <font color="#008080">ServiceApplicationInstanceDAO</font> applicationInstanceDao<font color="#990000">;</font>
+
+        @<b><font color="#000000">Value</font></b><font color="#990000">(</font><font color="#FF0000">"${applicationName}"</font><font color="#990000">)</font>
+        <b><font color="#0000FF">private</font></b> <font color="#008080">String</font> applicationName<font color="#990000">;</font>
+
+        <i><font color="#9A1900">// notice how we're referencing WAS configuration data - it's</font></i>
+        <i><font color="#9A1900">// available in spring environment, and we're referencing</font></i>
+        <i><font color="#9A1900">// property values!</font></i>
+        <b><font color="#0000FF">private</font></b> @<b><font color="#000000">Value</font></b><font color="#990000">(</font><font color="#FF0000">"${CellName}"</font><font color="#990000">)</font> <font color="#008080">String</font> cellName<font color="#990000">;</font>
+        <b><font color="#0000FF">private</font></b> @<b><font color="#000000">Value</font></b><font color="#990000">(</font><font color="#FF0000">"${NodeName}"</font><font color="#990000">)</font> <font color="#008080">String</font> nodeName<font color="#990000">;</font>
+        <b><font color="#0000FF">private</font></b> @<b><font color="#000000">Value</font></b><font color="#990000">(</font><font color="#FF0000">"${ServerName}"</font><font color="#990000">)</font> <font color="#008080">String</font> serverName<font color="#990000">;</font>
+        <b><font color="#0000FF">private</font></b> @<b><font color="#000000">Value</font></b><font color="#990000">(</font><font color="#FF0000">"${WC_defaulthost}"</font><font color="#990000">)</font> <font color="#008080">String</font> httpPort<font color="#990000">;</font>
+        <b><font color="#0000FF">private</font></b> @<b><font color="#000000">Value</font></b><font color="#990000">(</font><font color="#FF0000">"${WC_defaulthost_secure}"</font><font color="#990000">)</font> <font color="#008080">String</font> httpsPort<font color="#990000">;</font>
+        <b><font color="#0000FF">private</font></b> @<b><font color="#000000">Value</font></b><font color="#990000">(</font><font color="#FF0000">"${HostName}"</font><font color="#990000">)</font> <font color="#008080">String</font> hostName<font color="#990000">;</font>
+        <b><font color="#0000FF">private</font></b> @<b><font color="#000000">Value</font></b><font color="#990000">(</font><font color="#FF0000">"${ContextRoot}"</font><font color="#990000">)</font> <font color="#008080">String</font> contextRoot<font color="#990000">;</font>
+
+        <b><font color="#0000FF">private</font></b> @<b><font color="#000000">Value</font></b><font color="#990000">(</font><font color="#FF0000">"${REMOTE_SECURE}"</font><font color="#990000">)</font> <font color="#008080">Boolean</font> useSecurePorts<font color="#990000">;</font>
+
+        @Bean
+        <b><font color="#0000FF">public</font></b> <font color="#008080">ApplicationListener&lt;ApplicationContextEvent&gt;</font> <b><font color="#000000">applicationConfigurationPersister</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+                <font color="#008080">ApplicationConfigurationPersister</font> persister <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">ApplicationConfigurationPersister</font></b><font color="#990000">(</font><b><font color="#000000">applicationConfigurationService</font></b><font color="#990000">(),</font> <b><font color="#000000">application</font></b><font color="#990000">(),</font> <b><font color="#000000">applicationInstance</font></b><font color="#990000">());</font>
+                <b><font color="#0000FF">return</font></b> persister<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+
+        @Bean
+        <b><font color="#0000FF">public</font></b> <font color="#008080">ApplicationConfigurationService</font> <b><font color="#000000">applicationConfigurationService</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+                <b><font color="#0000FF">return</font></b> <b><font color="#0000FF">new</font></b> <b><font color="#000000">ApplicationConfigurationServiceImpl</font></b><font color="#990000">(</font>applicationDao<font color="#990000">,</font> applicationInstanceDao<font color="#990000">);</font>
+        <font color="#FF0000">}</font>
+
+        @Bean
+        <b><font color="#0000FF">public</font></b> <font color="#008080">ServiceApplication</font> <b><font color="#000000">application</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+                <font color="#008080">ServiceApplication</font> serviceApplication <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">ServiceApplication</font></b><font color="#990000">(</font>applicationName<font color="#990000">,</font> <font color="#FF0000">"automatically set from application"</font><font color="#990000">,</font> <b><font color="#0000FF">null</font></b><font color="#990000">);</font>
+                <b><font color="#0000FF">return</font></b> serviceApplication<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+
+        @Bean
+        <b><font color="#0000FF">public</font></b> <font color="#008080">ServiceApplicationInstance</font> <b><font color="#000000">applicationInstance</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+                <font color="#008080">String</font> serverIdentifier <font color="#990000">=</font> cellName <font color="#990000">+</font> <font color="#FF0000">"/"</font> <font color="#990000">+</font> nodeName <font color="#990000">+</font> <font color="#FF0000">"/"</font> <font color="#990000">+</font> serverName<font color="#990000">;</font>
+                <font color="#008080">String</font> appIdentifier <font color="#990000">=</font> applicationName<font color="#990000">;</font>
+                <font color="#008080">String</font> port <font color="#990000">=</font> httpPort<font color="#990000">;</font>
+                <font color="#009900">boolean</font> isSecure <font color="#990000">=</font> useSecurePorts<font color="#990000">;</font>
+                <b><font color="#0000FF">if</font></b> <font color="#990000">(</font>isSecure<font color="#990000">)</font> <font color="#FF0000">{</font>
+                    port <font color="#990000">=</font> httpsPort<font color="#990000">;</font>
+                <font color="#FF0000">}</font>
+                <font color="#008080">ServiceApplicationInstance</font> instance <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">ServiceApplicationInstance</font></b><font color="#990000">(</font>serverIdentifier<font color="#990000">,</font> appIdentifier<font color="#990000">);</font>
+                <b><font color="#0000FF">return</font></b> instance<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<ul>
+<li>
+<p>
+implement ApplicationListener that will actually store data into DB
+  when application is started:
+</p>
+</li>
+</ul>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">import</font></b> org<font color="#990000">.</font>slf4j<font color="#990000">.</font>Logger<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>slf4j<font color="#990000">.</font>LoggerFactory<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>ApplicationListener<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>event<font color="#990000">.</font>ApplicationContextEvent<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>event<font color="#990000">.</font>ContextRefreshedEvent<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>event<font color="#990000">.</font>ContextStartedEvent<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>event<font color="#990000">.</font>ContextStoppedEvent<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>scheduling<font color="#990000">.</font>annotation<font color="#990000">.</font>Async<font color="#990000">;</font>
+
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">ApplicationConfigurationPersister</font> <b><font color="#0000FF">implements</font></b> ApplicationListener<font color="#990000">&lt;</font>ApplicationContextEvent<font color="#990000">&gt;</font> <font color="#FF0000">{</font>
+
+        <b><font color="#0000FF">private</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">Logger</font> LOG <font color="#990000">=</font> LoggerFactory<font color="#990000">.</font><b><font color="#000000">getLogger</font></b><font color="#990000">(</font>ApplicationConfigurationPersister<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#008080">ApplicationConfigurationService</font> applicationConfigurationService<font color="#990000">;</font>
+        <b><font color="#0000FF">private</font></b> <font color="#008080">ServiceApplication</font> serviceApp<font color="#990000">;</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#008080">ServiceApplicationInstance</font> serviceApplicationInstance<font color="#990000">;</font>
+
+        <b><font color="#0000FF">public</font></b> <b><font color="#000000">ApplicationConfigurationPersister</font></b><font color="#990000">(</font><font color="#008080">ApplicationConfigurationService</font> applicationConfigurationService<font color="#990000">,</font> <font color="#008080">ServiceApplication</font> serviceApp<font color="#990000">,</font> <font color="#008080">ServiceApplicationInstance</font> serviceApplicationInstance<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <b><font color="#0000FF">this</font></b><font color="#990000">.</font>applicationConfigurationService <font color="#990000">=</font> applicationConfigurationService<font color="#990000">;</font>
+                <b><font color="#0000FF">this</font></b><font color="#990000">.</font>serviceApp <font color="#990000">=</font> serviceApp<font color="#990000">;</font>
+                <b><font color="#0000FF">this</font></b><font color="#990000">.</font>serviceApplicationInstance <font color="#990000">=</font> serviceApplicationInstance<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+
+        @Override
+        <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">onApplicationEvent</font></b><font color="#990000">(</font><font color="#008080">ApplicationContextEvent</font> event<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <b><font color="#0000FF">if</font></b> <font color="#990000">(</font>event <font color="#008080">instanceof</font> ContextStartedEvent<font color="#990000">)</font> <font color="#FF0000">{</font>
+                        <b><font color="#000000">onContextStart</font></b><font color="#990000">((</font>ContextStartedEvent<font color="#990000">)</font>event<font color="#990000">);</font>
+                <font color="#FF0000">}</font>
+                <b><font color="#0000FF">else</font></b> <b><font color="#0000FF">if</font></b> <font color="#990000">(</font>event <font color="#008080">instanceof</font> ContextStoppedEvent<font color="#990000">)</font> <font color="#FF0000">{</font>
+                        <b><font color="#000000">onContextStop</font></b><font color="#990000">((</font>ContextStoppedEvent<font color="#990000">)</font>event<font color="#990000">);</font>
+                <font color="#FF0000">}</font>
+                <b><font color="#0000FF">else</font></b> <b><font color="#0000FF">if</font></b> <font color="#990000">(</font>event <font color="#008080">instanceof</font> ContextRefreshedEvent<font color="#990000">)</font> <font color="#FF0000">{</font>
+                        <b><font color="#000000">onContextRefresh</font></b><font color="#990000">((</font>ContextRefreshedEvent<font color="#990000">)</font> event<font color="#990000">);</font>
+                <font color="#FF0000">}</font>
+
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#009900">void</font> <b><font color="#000000">onContextRefresh</font></b><font color="#990000">(</font><font color="#008080">ContextRefreshedEvent</font> event<font color="#990000">)</font> <font color="#FF0000">{</font>
+                LOG<font color="#990000">.</font><b><font color="#000000">info</font></b><font color="#990000">(</font><font color="#FF0000">"application context refreshed"</font><font color="#990000">);</font>
+                applicationConfigurationService<font color="#990000">.</font><b><font color="#000000">saveApplicationSettings</font></b><font color="#990000">(</font>serviceApp<font color="#990000">,</font> serviceApplicationInstance<font color="#990000">);</font>
+        <font color="#FF0000">}</font>
+
+
+        <b><font color="#0000FF">private</font></b> <font color="#009900">void</font> <b><font color="#000000">onContextStart</font></b><font color="#990000">(</font><font color="#008080">ContextStartedEvent</font> event<font color="#990000">)</font> <font color="#FF0000">{</font>
+                LOG<font color="#990000">.</font><b><font color="#000000">info</font></b><font color="#990000">(</font><font color="#FF0000">"application context started"</font><font color="#990000">);</font>
+
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#009900">void</font> <b><font color="#000000">onContextStop</font></b><font color="#990000">(</font><font color="#008080">ContextStoppedEvent</font> event<font color="#990000">)</font> <font color="#FF0000">{</font>
+                LOG<font color="#990000">.</font><b><font color="#000000">info</font></b><font color="#990000">(</font><font color="#FF0000">"application context stopped"</font><font color="#990000">);</font>
+
+        <font color="#FF0000">}</font>
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<hr>
+<h2><a name="_exposing_remote_service"></a>Exposing remote service</h2>
+<p>Let&#8217;s expose remote ManagementService:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#0000FF">public</font></b> <b><font color="#0000FF">interface</font></b> <font color="#008080">ManagementService</font> <font color="#FF0000">{</font>
+
+    <font color="#008080">String</font> <b><font color="#000000">serviceStatus</font></b><font color="#990000">()</font> <b><font color="#0000FF">throws</font></b> ManagementException<font color="#990000">;</font>
+
+    <font color="#009900">void</font> <b><font color="#000000">startService</font></b><font color="#990000">()</font> <b><font color="#0000FF">throws</font></b> ManagementException<font color="#990000">;</font>
+
+    <font color="#009900">void</font> <b><font color="#000000">stopService</font></b><font color="#990000">()</font> <b><font color="#0000FF">throws</font></b> ManagementException<font color="#990000">;</font>
+
+    <font color="#009900">void</font> <b><font color="#000000">startJmsContainer</font></b><font color="#990000">()</font> <b><font color="#0000FF">throws</font></b> ManagementException<font color="#990000">;</font>
+
+    <font color="#009900">void</font> <b><font color="#000000">stopJmsContainer</font></b><font color="#990000">()</font> <b><font color="#0000FF">throws</font></b> ManagementException<font color="#990000">;</font>
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<p>Notice that you have to provide managementService bean that implements
+desired remote service interface. If you&#8217;re interested what it does:
+the concrete implementation allows us to ask for internal service
+status and to start/stop spring default messsage listener container on
+specific server or all servers. This allows us to control how JMS
+messages are consumed in our system. There are other interfaces, but
+this is enough to give you an idea how to use it in your own system.</p>
+<p>Add something similar to the following code to the
+RemotingConfiguration.java:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt>@<b><font color="#000000">Configuration</font></b><font color="#990000">(</font><font color="#FF0000">"remotingConfiguration"</font><font color="#990000">)</font>
+@<b><font color="#000000">Import</font></b><font color="#990000">(</font><font color="#FF0000">{</font> RemotingHttpClientConfiguration<font color="#990000">.</font><b><font color="#0000FF">class</font></b> <font color="#FF0000">}</font><font color="#990000">)</font>
+@EnableAsync
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">RemotingConfiguration</font> <font color="#FF0000">{</font>
+    <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> CLUSTER_MANAGEMENT_SERVICE <font color="#990000">=</font> <font color="#FF0000">"clusterManagementService"</font><font color="#990000">;</font>
+    <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> SERVICE_PROXY_FACTORY <font color="#990000">=</font> <font color="#FF0000">"serviceProxyFactory"</font><font color="#990000">;</font>
+    <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> HESSIAN_DEBUG <font color="#990000">=</font> <font color="#FF0000">"HESSIAN_DEBUG"</font><font color="#990000">;</font>
+
+    @Autowired
+    <b><font color="#0000FF">private</font></b> <font color="#008080">ObjectFactory&lt;HttpClient&gt;</font> httpClientFactory<font color="#990000">;</font>
+
+    @Autowired
+    <b><font color="#0000FF">private</font></b> <font color="#008080">Environment</font> env<font color="#990000">;</font>
+
+    @Autowired
+    <b><font color="#0000FF">private</font></b> <font color="#008080">ManagementService</font> managementService<font color="#990000">;</font>
+    @Autowired
+    <b><font color="#0000FF">private</font></b> <font color="#008080">ClusterManagementService</font> clusterManagementService<font color="#990000">;</font>
+
+
+    @Bean
+    <b><font color="#0000FF">public</font></b> <font color="#008080">RemoteExporter</font> <b><font color="#000000">serviceExporter</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+        <font color="#008080">HttpInvokerServiceExporter</font> exporter <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">HttpInvokerServiceExporter</font></b><font color="#990000">();</font>
+        exporter<font color="#990000">.</font><b><font color="#000000">setService</font></b><font color="#990000">(</font>managementService<font color="#990000">);</font>
+        exporter<font color="#990000">.</font><b><font color="#000000">setServiceInterface</font></b><font color="#990000">(</font>ManagementService<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+        exporter<font color="#990000">.</font><b><font color="#000000">setAcceptProxyClasses</font></b><font color="#990000">(</font><b><font color="#0000FF">true</font></b><font color="#990000">);</font>
+
+        <b><font color="#0000FF">return</font></b> exporter<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<p>Now, you only need a way to invoke that service on each server. In
+order to do that let&#8217;s create ClusterManagementService:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#0000FF">public</font></b> <b><font color="#0000FF">interface</font></b> <font color="#008080">ClusterManagementService</font> <font color="#FF0000">{</font>
+
+        <font color="#008080">Map&lt;String, String&gt;</font> <b><font color="#000000">startCluster</font></b><font color="#990000">();</font>
+
+        <font color="#008080">Map&lt;String, String&gt;</font> <b><font color="#000000">stopCluster</font></b><font color="#990000">();</font>
+
+        <font color="#008080">Map&lt;String, String&gt;</font> <b><font color="#000000">statusCluster</font></b><font color="#990000">();</font>
+
+        <font color="#008080">Map&lt;String, String&gt;</font> <b><font color="#000000">startOn</font></b><font color="#990000">(</font><font color="#008080">String</font> serverId<font color="#990000">);</font>
+
+        <font color="#008080">Map&lt;String, String&gt;</font> <b><font color="#000000">stopOn</font></b><font color="#990000">(</font><font color="#008080">String</font> serverId<font color="#990000">);</font>
+
+        <font color="#008080">Map&lt;String, String&gt;</font> <b><font color="#000000">startJms</font></b><font color="#990000">();</font>
+
+        <font color="#008080">Map&lt;String, String&gt;</font> <b><font color="#000000">stopJms</font></b><font color="#990000">();</font>
+
+        <font color="#008080">Map&lt;String, String&gt;</font> <b><font color="#000000">startJmsOn</font></b><font color="#990000">(</font><font color="#008080">String</font> serverId<font color="#990000">);</font>
+
+        <font color="#008080">Map&lt;String, String&gt;</font> <b><font color="#000000">stopJmsOn</font></b><font color="#990000">(</font><font color="#008080">String</font> serverId<font color="#990000">);</font>
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<p>Yeah, it&#8217;s almost the same interface as the one above.
+We need a way to invoke service on specific server
+(serverId parameter) and
+we need to know what&#8217;s the result of remote service invocation on
+specific server (each method returns map of &lt;serverId,invocation
+status&gt;).</p>
+<p>This can be better written, and written in more generic way
+but let&#8217;s keep it simple for now&#8230;</p>
+<p>Here&#8217;s the snippet from ClusterManagementService implemenation:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">ClusterManagementServiceImpl</font> <b><font color="#0000FF">implements</font></b> ClusterManagementService <font color="#FF0000">{</font>
+    <b><font color="#0000FF">private</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">Logger</font> LOG <font color="#990000">=</font> LoggerFactory<font color="#990000">.</font><b><font color="#000000">getLogger</font></b><font color="#990000">(</font>ClusterManagementServiceImpl<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+    <i><font color="#9A1900">//</font></i>
+    <b><font color="#0000FF">private</font></b> <font color="#008080">ApplicationDAO</font> applicationDao<font color="#990000">;</font>
+    <b><font color="#0000FF">private</font></b> <font color="#008080">ServiceApplicationInstanceDAO</font> applicationInstanceDao<font color="#990000">;</font>
+
+    @Autowired
+    <b><font color="#0000FF">private</font></b> <font color="#008080">ServiceApplication</font> currentApplication<font color="#990000">;</font>
+
+    @Autowired
+    @<b><font color="#000000">Qualifier</font></b><font color="#990000">(</font>RemotingConfiguration<font color="#990000">.</font>SERVICE_PROXY_FACTORY<font color="#990000">)</font>
+    <b><font color="#0000FF">private</font></b> <font color="#008080">ServiceProxyFactory&lt;ManagementService&gt;</font> serviceProxyFactory<font color="#990000">;</font>
+
+    <i><font color="#9A1900">// ...</font></i>
+
+    @Override
+    <b><font color="#0000FF">public</font></b> <font color="#008080">Map&lt;String, String&gt;</font> <b><font color="#000000">startCluster</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+        <font color="#008080">ServiceExecutable</font> task <font color="#990000">=</font> <b><font color="#000000">startTask</font></b><font color="#990000">();</font>
+        <b><font color="#0000FF">return</font></b> <b><font color="#000000">invokeOnCluster</font></b><font color="#990000">(</font>task<font color="#990000">);</font>
+    <font color="#FF0000">}</font>
+
+    <b><font color="#0000FF">private</font></b> <font color="#008080">ServiceExecutable</font> <b><font color="#000000">startTask</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+        <font color="#008080">ServiceExecutable</font> task <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">ServiceExecutable</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+            @Override
+            <b><font color="#0000FF">public</font></b> <font color="#008080">String</font> <b><font color="#000000">execute</font></b><font color="#990000">(</font><font color="#008080">ManagementService</font> managementService<font color="#990000">)</font> <b><font color="#0000FF">throws</font></b> ManagementException <font color="#FF0000">{</font>
+                managementService<font color="#990000">.</font><b><font color="#000000">startService</font></b><font color="#990000">();</font>
+                <b><font color="#0000FF">return</font></b> <font color="#FF0000">"start invoked"</font><font color="#990000">;</font>
+            <font color="#FF0000">}</font>
+        <font color="#FF0000">}</font><font color="#990000">;</font>
+        <b><font color="#0000FF">return</font></b> task<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    @Override
+    <b><font color="#0000FF">public</font></b> <font color="#008080">Map&lt;String, String&gt;</font> <b><font color="#000000">startOn</font></b><font color="#990000">(</font><font color="#008080">String</font> serverId<font color="#990000">)</font> <font color="#FF0000">{</font>
+        <font color="#008080">ServiceExecutable</font> task <font color="#990000">=</font> <b><font color="#000000">startTask</font></b><font color="#990000">();</font>
+
+        <b><font color="#0000FF">return</font></b> <b><font color="#000000">invokeOnServer</font></b><font color="#990000">(</font>serverId<font color="#990000">,</font> task<font color="#990000">);</font>
+    <font color="#FF0000">}</font>
+
+
+    <b><font color="#0000FF">private</font></b> <font color="#008080">Map&lt;String, String&gt;</font> <b><font color="#000000">invokeOnCluster</font></b><font color="#990000">(</font><font color="#008080">ServiceExecutable</font> task<font color="#990000">)</font> <font color="#FF0000">{</font>
+        <font color="#008080">Map&lt;String, String&gt;</font> statusMap <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> HashMap<font color="#990000">&lt;</font>String<font color="#990000">,</font> String<font color="#990000">&gt;();</font>
+
+        <font color="#008080">Map&lt;String, ManagementService&gt;</font> clusterServices <font color="#990000">=</font> <b><font color="#000000">loadCluster</font></b><font color="#990000">();</font>
+
+        <font color="#008080">Set&lt;String&gt;</font> servers <font color="#990000">=</font> clusterServices<font color="#990000">.</font><b><font color="#000000">keySet</font></b><font color="#990000">();</font>
+        <b><font color="#0000FF">for</font></b> <font color="#990000">(</font><font color="#008080">String</font> server <font color="#990000">:</font> servers<font color="#990000">)</font> <font color="#FF0000">{</font>
+            <font color="#008080">ManagementService</font> managementService <font color="#990000">=</font> clusterServices<font color="#990000">.</font><b><font color="#000000">get</font></b><font color="#990000">(</font>server<font color="#990000">);</font>
+            <b><font color="#0000FF">try</font></b> <font color="#FF0000">{</font>
+                <font color="#008080">String</font> status <font color="#990000">=</font> task<font color="#990000">.</font><b><font color="#000000">execute</font></b><font color="#990000">(</font>managementService<font color="#990000">);</font>
+                statusMap<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>server<font color="#990000">,</font> status<font color="#990000">);</font>
+            <font color="#FF0000">}</font> <b><font color="#0000FF">catch</font></b> <font color="#990000">(</font><font color="#008080">Throwable</font> t<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <font color="#008080">String</font> msg <font color="#990000">=</font> <font color="#FF0000">"Error occured while invoking service on server '"</font> <font color="#990000">+</font> server <font color="#990000">+</font> <font color="#FF0000">"'"</font><font color="#990000">;</font>
+                LOG<font color="#990000">.</font><b><font color="#000000">error</font></b><font color="#990000">(</font>msg<font color="#990000">,</font> t<font color="#990000">);</font>
+                statusMap<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>server<font color="#990000">,</font> msg<font color="#990000">);</font>
+            <font color="#FF0000">}</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">return</font></b> statusMap<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    <b><font color="#0000FF">private</font></b> <font color="#008080">Map&lt;String, String&gt;</font> <b><font color="#000000">invokeOnServer</font></b><font color="#990000">(</font><font color="#008080">String</font> serverId<font color="#990000">,</font> <font color="#008080">ServiceExecutable</font> task<font color="#990000">)</font> <font color="#FF0000">{</font>
+        <font color="#008080">Map&lt;String, String&gt;</font> statusMap <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> HashMap<font color="#990000">&lt;</font>String<font color="#990000">,</font> String<font color="#990000">&gt;();</font>
+
+        <font color="#008080">Map&lt;String, ManagementService&gt;</font> clusterServices <font color="#990000">=</font> <b><font color="#000000">loadCluster</font></b><font color="#990000">();</font>
+
+        <font color="#008080">String</font> msg <font color="#990000">=</font> <font color="#FF0000">"Unable to retrieve management service for server with id: "</font> <font color="#990000">+</font> serverId<font color="#990000">;;</font>
+
+        <font color="#008080">ManagementService</font> managementService <font color="#990000">=</font> clusterServices<font color="#990000">.</font><b><font color="#000000">get</font></b><font color="#990000">(</font>serverId<font color="#990000">.</font><b><font color="#000000">trim</font></b><font color="#990000">());</font>
+        <b><font color="#0000FF">if</font></b> <font color="#990000">(</font><b><font color="#0000FF">null</font></b> <font color="#990000">!=</font> managementService<font color="#990000">)</font> <font color="#FF0000">{</font>
+            <b><font color="#0000FF">try</font></b> <font color="#FF0000">{</font>
+                msg <font color="#990000">=</font> task<font color="#990000">.</font><b><font color="#000000">execute</font></b><font color="#990000">(</font>managementService<font color="#990000">);</font>
+            <font color="#FF0000">}</font>
+            <b><font color="#0000FF">catch</font></b> <font color="#990000">(</font><font color="#008080">Throwable</font> t<font color="#990000">)</font> <font color="#FF0000">{</font>
+                msg <font color="#990000">=</font> <font color="#FF0000">"Error occured while invoking service on server '"</font> <font color="#990000">+</font> serverId <font color="#990000">+</font> <font color="#FF0000">"'"</font><font color="#990000">;</font>
+                LOG<font color="#990000">.</font><b><font color="#000000">error</font></b><font color="#990000">(</font>msg<font color="#990000">,</font> t<font color="#990000">);</font>
+            <font color="#FF0000">}</font>
+        <font color="#FF0000">}</font>
+        statusMap<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>serverId<font color="#990000">,</font> msg<font color="#990000">);</font>
+
+        <b><font color="#0000FF">return</font></b> statusMap<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    <b><font color="#0000FF">private</font></b> <font color="#008080">Map&lt;String, ManagementService&gt;</font> <b><font color="#000000">loadCluster</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+        <font color="#008080">Map&lt;String, ManagementService&gt;</font> cluster <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> HashMap<font color="#990000">&lt;</font>String<font color="#990000">,</font> ManagementService<font color="#990000">&gt;();</font>
+        <b><font color="#0000FF">try</font></b> <font color="#FF0000">{</font>
+            currentApplication <font color="#990000">=</font> applicationDao<font color="#990000">.</font><b><font color="#000000">load</font></b><font color="#990000">(</font>currentApplication<font color="#990000">.</font><b><font color="#000000">getApplicationName</font></b><font color="#990000">());</font>
+            <font color="#008080">List&lt;ServiceApplicationInstance&gt;</font> instances <font color="#990000">=</font> applicationInstanceDao<font color="#990000">.</font><b><font color="#000000">loadInstances</font></b><font color="#990000">(</font>currentApplication<font color="#990000">);</font>
+            <b><font color="#0000FF">for</font></b> <font color="#990000">(</font><font color="#008080">ServiceApplicationInstance</font> instance <font color="#990000">:</font> instances<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <font color="#008080">String</font> managementUrl <font color="#990000">=</font> instance<font color="#990000">.</font><b><font color="#000000">getInstanceManagementUrl</font></b><font color="#990000">();</font>
+                <font color="#008080">ManagementService</font> serviceProxy <font color="#990000">=</font> serviceProxyFactory<font color="#990000">.</font><b><font color="#000000">getService</font></b><font color="#990000">(</font>managementUrl<font color="#990000">);</font>
+                <b><font color="#0000FF">if</font></b> <font color="#990000">(</font><b><font color="#0000FF">null</font></b> <font color="#990000">==</font> serviceProxy<font color="#990000">)</font> <font color="#FF0000">{</font>
+                    LOG<font color="#990000">.</font><b><font color="#000000">error</font></b><font color="#990000">(</font><font color="#FF0000">"Unable to create service proxy for {}"</font><font color="#990000">,</font> managementUrl<font color="#990000">);</font>
+                <font color="#FF0000">}</font>
+                <b><font color="#0000FF">else</font></b> <font color="#FF0000">{</font>
+                    cluster<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>instance<font color="#990000">.</font><b><font color="#000000">getServerIdentifier</font></b><font color="#990000">(),</font> serviceProxy<font color="#990000">);</font>
+                <font color="#FF0000">}</font>
+            <font color="#FF0000">}</font>
+        <font color="#FF0000">}</font> <b><font color="#0000FF">catch</font></b> <font color="#990000">(</font><font color="#008080">Throwable</font> t<font color="#990000">)</font> <font color="#FF0000">{</font>
+            LOG<font color="#990000">.</font><b><font color="#000000">error</font></b><font color="#990000">(</font><font color="#FF0000">"Unable to load cluster configuration."</font><font color="#990000">,</font> t<font color="#990000">);</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">return</font></b> cluster<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    <b><font color="#0000FF">abstract</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">ServiceExecutable</font> <font color="#FF0000">{</font>
+        <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">abstract</font></b> <font color="#008080">String</font> <b><font color="#000000">execute</font></b><font color="#990000">(</font><font color="#008080">ManagementService</font> managementService<font color="#990000">)</font> <b><font color="#0000FF">throws</font></b> ManagementException<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+</tt></pre></td></tr></table>
+<p>Notice how we&#8217;re using serviceProxyFactory in order to call remote
+service. ServiceProxyFactory is actually:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#0000FF">public</font></b> <b><font color="#0000FF">interface</font></b> <font color="#008080">ServiceProxyFactory</font><font color="#990000">&lt;</font>T<font color="#990000">&gt;</font> <font color="#FF0000">{</font>
+
+        <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">abstract</font></b> <font color="#008080">T</font> <b><font color="#000000">getService</font></b><font color="#990000">(</font><font color="#008080">String</font> serviceUrl<font color="#990000">)</font> <b><font color="#0000FF">throws</font></b> MalformedURLException<font color="#990000">;</font>
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<p>I have implemented Hessian and HttpInvoker serviceProxyFactories:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt>
+<b><font color="#000080">import</font></b> java<font color="#990000">.</font>net<font color="#990000">.</font>MalformedURLException<font color="#990000">;</font>
+
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>apache<font color="#990000">.</font>http<font color="#990000">.</font>client<font color="#990000">.</font>HttpClient<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>beans<font color="#990000">.</font>factory<font color="#990000">.</font>ObjectFactory<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>remoting<font color="#990000">.</font>httpinvoker<font color="#990000">.</font>HttpComponentsHttpInvokerRequestExecutor<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>remoting<font color="#990000">.</font>httpinvoker<font color="#990000">.</font>HttpInvokerProxyFactoryBean<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>remoting<font color="#990000">.</font>httpinvoker<font color="#990000">.</font>HttpInvokerRequestExecutor<font color="#990000">;</font>
+
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">HttpInvokerServiceProxyFactory</font><font color="#990000">&lt;</font>T<font color="#990000">&gt;</font> <b><font color="#0000FF">implements</font></b> ServiceProxyFactory<font color="#990000">&lt;</font>T<font color="#990000">&gt;</font> <font color="#FF0000">{</font>
+    <b><font color="#0000FF">private</font></b> <font color="#008080">Class&lt;T&gt;</font> typeRef<font color="#990000">;</font>
+    <b><font color="#0000FF">private</font></b> <font color="#008080">ObjectFactory&lt;HttpClient&gt;</font> httpClientFactory<font color="#990000">;</font>
+
+    <b><font color="#0000FF">public</font></b> <b><font color="#000000">HttpInvokerServiceProxyFactory</font></b><font color="#990000">(</font><font color="#008080">Class&lt;T&gt; typeRef, ObjectFactory&lt;HttpClient&gt;</font> httpClientFactory<font color="#990000">)</font> <font color="#FF0000">{</font>
+        <b><font color="#0000FF">this</font></b><font color="#990000">.</font>typeRef <font color="#990000">=</font> typeRef<font color="#990000">;</font>
+        <b><font color="#0000FF">this</font></b><font color="#990000">.</font>httpClientFactory <font color="#990000">=</font> httpClientFactory<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    @Override
+    <b><font color="#0000FF">public</font></b> <font color="#008080">T</font> <b><font color="#000000">getService</font></b><font color="#990000">(</font><font color="#008080">String</font> serviceUrl<font color="#990000">)</font> <b><font color="#0000FF">throws</font></b> MalformedURLException <font color="#FF0000">{</font>
+        <font color="#008080">HttpInvokerProxyFactoryBean</font> proxyFactory <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">HttpInvokerProxyFactoryBean</font></b><font color="#990000">();</font>
+        proxyFactory<font color="#990000">.</font><b><font color="#000000">setServiceUrl</font></b><font color="#990000">(</font>serviceUrl<font color="#990000">);</font>
+        proxyFactory<font color="#990000">.</font><b><font color="#000000">setServiceInterface</font></b><font color="#990000">(</font>typeRef<font color="#990000">);</font>
+
+        <font color="#008080">HttpInvokerRequestExecutor</font> httpInvokerRequestExecutor <font color="#990000">=</font> <b><font color="#000000">httpInvokerRequestExecutor</font></b><font color="#990000">();</font>
+        proxyFactory<font color="#990000">.</font><b><font color="#000000">setHttpInvokerRequestExecutor</font></b><font color="#990000">(</font>httpInvokerRequestExecutor<font color="#990000">);</font>
+        proxyFactory<font color="#990000">.</font><b><font color="#000000">afterPropertiesSet</font></b><font color="#990000">();</font>
+        <font color="#008080">Object</font> object <font color="#990000">=</font> proxyFactory<font color="#990000">.</font><b><font color="#000000">getObject</font></b><font color="#990000">();</font>
+
+        <b><font color="#0000FF">return</font></b> typeRef<font color="#990000">.</font><b><font color="#000000">cast</font></b><font color="#990000">(</font>object<font color="#990000">);</font>
+    <font color="#FF0000">}</font>
+
+    <b><font color="#0000FF">private</font></b> <font color="#008080">HttpInvokerRequestExecutor</font> <b><font color="#000000">httpInvokerRequestExecutor</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+        <font color="#008080">HttpClient</font> httpClient <font color="#990000">=</font> httpClientFactory<font color="#990000">.</font><b><font color="#000000">getObject</font></b><font color="#990000">();</font>
+        <font color="#008080">HttpComponentsHttpInvokerRequestExecutor</font> executor <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">HttpComponentsHttpInvokerRequestExecutor</font></b><font color="#990000">(</font>httpClient<font color="#990000">);</font>
+        <b><font color="#0000FF">return</font></b> executor<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<p>HessianServiceProxyFactory uses hessian over apache http client
+library (available from <a href="https://github.com/ilx/hessian-httpclient">https://github.com/ilx/hessian-httpclient</a>)</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">import</font></b> java<font color="#990000">.</font>net<font color="#990000">.</font>MalformedURLException<font color="#990000">;</font>
+
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>apache<font color="#990000">.</font>http<font color="#990000">.</font>client<font color="#990000">.</font>HttpClient<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>beans<font color="#990000">.</font>factory<font color="#990000">.</font>ObjectFactory<font color="#990000">;</font>
+
+<b><font color="#000080">import</font></b> com<font color="#990000">.</font>caucho<font color="#990000">.</font>hessian<font color="#990000">.</font>client<font color="#990000">.</font>HessianConnectionFactory<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> com<font color="#990000">.</font>caucho<font color="#990000">.</font>hessian<font color="#990000">.</font>client<font color="#990000">.</font>HessianProxyFactory<font color="#990000">;</font>
+
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">HessianServiceProxyFactory</font><font color="#990000">&lt;</font>T<font color="#990000">&gt;</font> <b><font color="#0000FF">implements</font></b> ServiceProxyFactory<font color="#990000">&lt;</font>T<font color="#990000">&gt;</font> <font color="#FF0000">{</font>
+
+        <b><font color="#0000FF">private</font></b> <font color="#008080">Class&lt;T&gt;</font> typeRef<font color="#990000">;</font>
+        <b><font color="#0000FF">private</font></b> <font color="#008080">ObjectFactory&lt;HttpClient&gt;</font> httpClientFactory<font color="#990000">;</font>
+        <b><font color="#0000FF">private</font></b> <font color="#009900">boolean</font> isDebug<font color="#990000">;</font>
+
+        <b><font color="#0000FF">public</font></b> <b><font color="#000000">HessianServiceProxyFactory</font></b><font color="#990000">(</font><font color="#008080">Class&lt;T&gt; typeRef, ObjectFactory&lt;HttpClient&gt;</font> httpClientFactory<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <b><font color="#0000FF">this</font></b><font color="#990000">.</font>typeRef <font color="#990000">=</font> typeRef<font color="#990000">;</font>
+                <b><font color="#0000FF">this</font></b><font color="#990000">.</font>httpClientFactory <font color="#990000">=</font> httpClientFactory<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+
+        @<b><font color="#000000">SuppressWarnings</font></b><font color="#990000">(</font><font color="#FF0000">"unchecked"</font><font color="#990000">)</font>
+        @Override
+        <b><font color="#0000FF">public</font></b> <font color="#008080">T</font> <b><font color="#000000">getService</font></b><font color="#990000">(</font><font color="#008080">String</font> serviceUrl<font color="#990000">)</font> <b><font color="#0000FF">throws</font></b> MalformedURLException <font color="#FF0000">{</font>
+                <font color="#008080">HessianProxyFactory</font> hessianProxyFactory <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">HessianProxyFactory</font></b><font color="#990000">();</font>
+
+                <font color="#008080">HttpClient</font> httpClient <font color="#990000">=</font> httpClientFactory<font color="#990000">.</font><b><font color="#000000">getObject</font></b><font color="#990000">();</font>
+                <font color="#008080">HessianConnectionFactory</font> hessianConnectionFactory <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">HttpClientHessianConnectionFactory</font></b><font color="#990000">(</font>httpClient<font color="#990000">);</font>
+                hessianProxyFactory<font color="#990000">.</font><b><font color="#000000">setConnectionFactory</font></b><font color="#990000">(</font>hessianConnectionFactory<font color="#990000">);</font>
+
+                hessianProxyFactory<font color="#990000">.</font><b><font color="#000000">setDebug</font></b><font color="#990000">(</font>isDebug<font color="#990000">);</font>
+
+                <b><font color="#0000FF">return</font></b> <font color="#990000">(</font>T<font color="#990000">)</font> hessianProxyFactory<font color="#990000">.</font><b><font color="#000000">create</font></b><font color="#990000">(</font>typeRef<font color="#990000">,</font> serviceUrl<font color="#990000">);</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">setDebug</font></b><font color="#990000">(</font><font color="#009900">boolean</font> isDebug<font color="#990000">)</font> <font color="#FF0000">{</font>
+                <b><font color="#0000FF">this</font></b><font color="#990000">.</font>isDebug <font color="#990000">=</font> isDebug<font color="#990000">;</font>
+        <font color="#FF0000">}</font>
+
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<p>ClusterManagementService implementation needs access to
+serviceProxyFactory and we might want to expose it as a remote service
+also.  Add something similar to the following snippet to the
+RemotingConfiguration.java:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt>    @<b><font color="#000000">Bean</font></b><font color="#990000">(</font>name <font color="#990000">=</font> SERVICE_PROXY_FACTORY<font color="#990000">)</font>
+    <b><font color="#0000FF">public</font></b> <font color="#008080">ServiceProxyFactory&lt;ManagementService&gt;</font> <b><font color="#000000">serviceProxyFactory</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+        <font color="#008080">ServiceProxyFactory&lt;ManagementService&gt;</font> proxyFactory <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> HttpInvokerServiceProxyFactory<font color="#990000">&lt;</font>ManagementService<font color="#990000">&gt;(</font>
+                ManagementService<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">,</font> httpClientFactory<font color="#990000">);</font>
+        <b><font color="#0000FF">return</font></b> proxyFactory<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+
+    <i><font color="#9A1900">/**</font></i>
+<i><font color="#9A1900">     * ClusterManagementService exposed through HttpInvoker. This will enable</font></i>
+<i><font color="#9A1900">     * other apps to access ClusterManagementService.</font></i>
+<i><font color="#9A1900">     */</font></i>
+    @Bean
+    <b><font color="#0000FF">public</font></b> <font color="#008080">RemoteExporter</font> <b><font color="#000000">clusterManagementServiceExporter</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+        <font color="#008080">HttpInvokerServiceExporter</font> exporter <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">HttpInvokerServiceExporter</font></b><font color="#990000">();</font>
+        exporter<font color="#990000">.</font><b><font color="#000000">setService</font></b><font color="#990000">(</font>clusterManagementService<font color="#990000">);</font>
+        exporter<font color="#990000">.</font><b><font color="#000000">setServiceInterface</font></b><font color="#990000">(</font>ClusterManagementService<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+        exporter<font color="#990000">.</font><b><font color="#000000">setAcceptProxyClasses</font></b><font color="#990000">(</font><b><font color="#0000FF">true</font></b><font color="#990000">);</font>
+
+        <b><font color="#0000FF">return</font></b> exporter<font color="#990000">;</font>
+    <font color="#FF0000">}</font></tt></pre></td></tr></table>
+<p>Now take a deep breath and think about all this&#8230;</p>
+<p>There&#8217;s something else I want to share. Think about how you want to
+invoke ManagementService operations.</p>
+<p>You want to invoke it&#8217;s operations, but you probably don&#8217;t want to
+wait until invocation finishes! That might take too long and you
+probably don&#8217;t want your https session to timeout!</p>
+<p>That&#8217;s why I made ManagementService operations @Async:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt>
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">ManagementServiceImpl</font> <b><font color="#0000FF">implements</font></b> ManagementService <font color="#FF0000">{</font>
+
+    @Async
+    <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">stopService</font></b><font color="#990000">()</font> <b><font color="#0000FF">throws</font></b> ManagementException <font color="#FF0000">{</font>
+        <b><font color="#0000FF">try</font></b> <font color="#FF0000">{</font>
+            <i><font color="#9A1900">// stop jms container</font></i>
+            <i><font color="#9A1900">// release resources</font></i>
+        <font color="#FF0000">}</font> <b><font color="#0000FF">catch</font></b> <font color="#990000">(</font><font color="#008080">Throwable</font> t<font color="#990000">)</font> <font color="#FF0000">{</font>
+            <font color="#008080">String</font> msg <font color="#990000">=</font> <font color="#FF0000">"Unable to stop service."</font><font color="#990000">;</font>
+            LOGGER<font color="#990000">.</font><b><font color="#000000">error</font></b><font color="#990000">(</font>msg<font color="#990000">,</font> t<font color="#990000">);</font>
+            <b><font color="#0000FF">throw</font></b> <b><font color="#0000FF">new</font></b> <b><font color="#000000">ManagementException</font></b><font color="#990000">(</font>msg<font color="#990000">,</font> t<font color="#990000">);</font>
+        <font color="#FF0000">}</font>
+        <i><font color="#9A1900">// ....</font></i>
+    <font color="#FF0000">}</font>
+
+    <i><font color="#9A1900">// ....</font></i>
+
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<p>For those who need it: The code posted here is available under Apache License, version 2.0
+(<a href="http://www.apache.org/licenses/LICENSE-2.0.html">http://www.apache.org/licenses/LICENSE-2.0.html</a>). Feel free to use it
+however you want.</p>
+<hr>
+<h2><a name="_reference"></a>Reference</h2>
+<ul>
+<li>
+<p>
+<a href="http://www.ibm.com/developerworks/websphere/techjournal/0307_wang/wang.html">http://www.ibm.com/developerworks/websphere/techjournal/0307_wang/wang.html</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://www.ibm.com/developerworks/websphere/library/techarticles/0606_efremenko/0606_efremenko.html">http://www.ibm.com/developerworks/websphere/library/techarticles/0606_efremenko/0606_efremenko.html</a>
+</p>
+</li>
+<li>
+<p>
+ConfigService javadoc: <a href="http://pic.dhe.ibm.com/infocenter/wasinfo/v6r1/index.jsp?topic=%2Fcom.ibm.websphere.javadoc.doc%2Fpublic_html%2Fapi%2Fcom%2Fibm%2Fwebsphere%2Fmanagement%2Fconfigservice%2FConfigService.html">http://pic.dhe.ibm.com/infocenter/wasinfo/v6r1/index.jsp?topic=%2Fcom.ibm.websphere.javadoc.doc%2Fpublic_html%2Fapi%2Fcom%2Fibm%2Fwebsphere%2Fmanagement%2Fconfigservice%2FConfigService.html</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://webspherescript.wordpress.com/2011/09/29/how-to-list-and-edit-endpoint-with-wsadmin-and-jython/">http://webspherescript.wordpress.com/2011/09/29/how-to-list-and-edit-endpoint-with-wsadmin-and-jython/</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://pic.dhe.ibm.com/infocenter/wasinfo/v6r0/index.jsp?topic=%2Fcom.ibm.websphere.javadoc.doc%2Fconfigdoc%2Fconfigdocinfo.html">http://pic.dhe.ibm.com/infocenter/wasinfo/v6r0/index.jsp?topic=%2Fcom.ibm.websphere.javadoc.doc%2Fconfigdoc%2Fconfigdocinfo.html</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://pic.dhe.ibm.com/infocenter/wasinfo/v6r1/index.jsp?topic=%2Fcom.ibm.websphere.javadoc.doc%2Fpublic_html%2Fapi%2Fcom%2Fibm%2Fwebsphere%2Fmanagement%2Fconfigservice%2FConfigService.html">http://pic.dhe.ibm.com/infocenter/wasinfo/v6r1/index.jsp?topic=%2Fcom.ibm.websphere.javadoc.doc%2Fpublic_html%2Fapi%2Fcom%2Fibm%2Fwebsphere%2Fmanagement%2Fconfigservice%2FConfigService.html</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://www.trainologic.com/blog/2009/06/15/managing-websphere-6-resources-with-jmx-how-to-part-1/">http://www.trainologic.com/blog/2009/06/15/managing-websphere-6-resources-with-jmx-how-to-part-1/</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://www.trainologic.com/blog/?s=Managing%20WebSphere%206%20Resources%20with%20JMX%20-%20How%20to%20%28part%202%29">http://www.trainologic.com/blog/?s=Managing%20WebSphere%206%20Resources%20with%20JMX%20-%20How%20to%20%28part%202%29</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://pic.dhe.ibm.com/infocenter/wasinfo/v8r0/index.jsp?topic=%2Fcom.ibm.websphere.base.doc%2Finfo%2Faes%2Fae%2Ftdat_cjmxapis.html">http://pic.dhe.ibm.com/infocenter/wasinfo/v8r0/index.jsp?topic=%2Fcom.ibm.websphere.base.doc%2Finfo%2Faes%2Fae%2Ftdat_cjmxapis.html</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://www-01.ibm.com/support/docview.wss?uid=swg21411254">http://www-01.ibm.com/support/docview.wss?uid=swg21411254</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://www.zomeon.com/2831412/does-anyone-have-some-jmx-code-for-creating-a-new-websphere-datasource">http://www.zomeon.com/2831412/does-anyone-have-some-jmx-code-for-creating-a-new-websphere-datasource</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://stackoverflow.com/questions/11397348/how-do-i-add-a-notificationlistener-to-an-mbean-on-websphere-7-the-listeners-a">http://stackoverflow.com/questions/11397348/how-do-i-add-a-notificationlistener-to-an-mbean-on-websphere-7-the-listeners-a</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://www.edu4eng.com/articles/WAS/scripts/mbeans/Overview.html">http://www.edu4eng.com/articles/WAS/scripts/mbeans/Overview.html</a>
+</p>
+</li>
+<li>
+<p>
+<a href="https://community.jboss.org/thread/49441">https://community.jboss.org/thread/49441</a>
+</p>
+</li>
+<li>
+<p>
+how to retrieve port numbers: <a href="http://pic.dhe.ibm.com/infocenter/wasinfo/v6r1/index.jsp?topic=%2Fcom.ibm.websphere.express.doc%2Finfo%2Fexp%2Fae%2Ftxml_portnumber.html">http://pic.dhe.ibm.com/infocenter/wasinfo/v6r1/index.jsp?topic=%2Fcom.ibm.websphere.express.doc%2Finfo%2Fexp%2Fae%2Ftxml_portnumber.html</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://blog.xebia.com/2009/11/23/websphere-scripting-with-wsadmin-containment-paths-configuration-ids-and-object-names/">http://blog.xebia.com/2009/11/23/websphere-scripting-with-wsadmin-containment-paths-configuration-ids-and-object-names/</a>
+</p>
+</li>
+<li>
+<p>
+<a href="https://www.ibm.com/developerworks/community/forums/html/topic?id=77777777-0000-0000-0000-000013725041">https://www.ibm.com/developerworks/community/forums/html/topic?id=77777777-0000-0000-0000-000013725041</a>
+</p>
+</li>
+</ul>
+</div>

@@ -1,0 +1,1057 @@
+How to retrieve WAS ports using JMX
+===================================
+
+== Problem == 
+
+We would like to "autodetect" ports that WebSphere Application Server
+uses. In order to do that we have to invoke WebSphere ConfigService
+MBean.
+
+Why? Let's say that we have a topology that consists of:
+
+load balancer -> IHS servers -> frontend WAS servers -> backend WAS
+servers 
+
+Now, let us presume that backend servers are clustered, and there is
+more than one server per node. The only communication channel open
+from frotend servers to the backend servers is HTTPS.
+
+We would like to expose some kind of a service on the backend service,
+and invoke methods of that service either on one server or all 
+available servers.
+
+In order to invoke service we could use RMI, but that's not an option
+since we would need access to the backend servers RMI ports. "Simple"
+solution is to expose backend services using hessian or httpclient.
+Unfortunately, if we do that we need to tell frontend servers how to
+access backend servers - what's their hostname and what port to use -
+we need WAS topology data.
+
+Later on we can save that data into database or expose it to our
+spring applications.
+
+
+== Solution ==
+
+- Create service that will access websphere Config service:
+
+[source,java]
+-------------
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+
+import javax.management.AttributeList;
+import javax.management.ObjectName;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.ibm.websphere.management.Session;
+import com.ibm.websphere.management.configservice.ConfigService;
+import com.ibm.websphere.management.configservice.ConfigServiceFactory;
+import com.ibm.websphere.management.configservice.ConfigServiceHelper;
+import com.ibm.websphere.management.exception.AdminException;
+import com.ibm.websphere.management.exception.ConfigServiceException;
+import com.ibm.websphere.management.exception.ConnectorException;
+import com.ibm.websphere.runtime.ServerName;
+
+public class ServerConfigService {
+	private static final Logger LOG = LoggerFactory.getLogger(ServerConfigService.class);
+	private ConfigService configService = getConfigService();
+	private String serverFullName;
+	private String nodeName;
+	private String cellName;
+
+	public ServerConfigService() {
+		serverFullName = ServerName.getFullName();
+		String[] segments = serverFullName.split("\\\\");
+		// node/cell/server
+		if (segments.length == 3) {
+			cellName = segments[0];
+			nodeName = segments[1];
+		}
+	}
+
+	public String getCurrentServerName() {
+		return ServerName.getDisplayName();
+	}
+
+	public String getCurrentServerFullName() {
+		return serverFullName;
+	}
+
+	public String getNodeName() {
+		return nodeName;
+	}
+
+	public String getCellName() {
+		return cellName;
+	}
+
+	public ServerInfo getServerInfo() {
+
+		ServerInfo serverInfo = ServerInfo.EMPTY;
+		Session mgmtSession = new Session();
+		try {
+			String serverFullName = getCurrentServerFullName();
+			LOG.trace("fetching server info for: {}", serverFullName);
+
+			ObjectName serverObjectName = getServerObjectName(mgmtSession);
+
+			ObjectName nodeObjectName = getNodeObjectName(mgmtSession);
+			ObjectName[] serverEntryObjectNames = configService.resolve(mgmtSession, nodeObjectName, "ServerEntry=");
+
+			Map<String,Endpoint> mapOfEndpoints = new HashMap<String, Endpoint>();
+			for (ObjectName serverEntryON : serverEntryObjectNames) {
+				String serverName = (String)configService.getAttribute(mgmtSession, serverEntryON, "serverName");
+				if (getCurrentServerName().equals(serverName)) {
+					List<AttributeList> specialEndpoints = (List<AttributeList>) configService.getAttribute(mgmtSession, serverEntryON, "specialEndpoints");
+					for (AttributeList specialEndpoint : specialEndpoints) {
+						AttributeMap specialEndpointMap = new AttributeMap(specialEndpoint);
+						String endPointName = specialEndpointMap.get("endPointName", String.class);
+						AttributeList endpointAttributes = specialEndpointMap.get("endPoint", AttributeList.class);
+						AttributeMap endpointMap = new AttributeMap(endpointAttributes);
+						String host = endpointMap.get("host", String.class);
+						Integer port = endpointMap.get("port", Integer.class);
+						LOG.trace("found endpoint {} on host {} and port {}", new Object[] { endPointName, host, port});
+						Endpoint endpoint = new Endpoint();
+						endpoint.name = endPointName;
+						endpoint.hostname = host;
+						endpoint.port = port;
+						mapOfEndpoints.put(endpoint.name, endpoint);
+					}
+					LOG.trace("fetched special endpoints");
+				}
+			}
+
+			PortExtractorStrategy portExtractorStrategy = new PortExtractorStrategy();
+			serverInfo.http_port = portExtractorStrategy.getHttpPort(mapOfEndpoints);
+			serverInfo.https_port = portExtractorStrategy.getHttpsPort(mapOfEndpoints);
+			String hostName = retrieveHostName(mgmtSession, getCurrentServerName());
+			serverInfo.hostname = hostName;
+			serverInfo.serverName = getCurrentServerName();
+
+			LOG.trace("retrieved server entries");
+
+		} catch (Throwable t) {
+			String msg = "Unexpected error caught while retrieving information about WAS server.";
+			LOG.error(msg, t);
+			throw new IllegalStateException(msg, t);
+		}
+		finally {
+			discard(mgmtSession);
+		}
+
+		return serverInfo;
+	}
+
+	private String retrieveHostName(Session mgmtSession, String targetServerName) {
+		String hostname = null;
+		ObjectName nodeObjectName = getNodeObjectName(mgmtSession);
+		try {
+			ObjectName[] serverIndexes = configService.resolve(mgmtSession, nodeObjectName, "ServerIndex=");
+			for (ObjectName serverIndexON : serverIndexes) {
+				List<AttributeList> serverEntries = (List<AttributeList>) configService.getAttribute(mgmtSession, serverIndexON, "serverEntries");
+				for (AttributeList serverEntryAtrs : serverEntries) {
+					AttributeMap serverEntryMap = new AttributeMap(serverEntryAtrs);
+					String serverName = serverEntryMap.get("serverName", String.class);
+					if (targetServerName.equals(serverName)) {
+						hostname = (String) configService.getAttribute(mgmtSession, serverIndexON, "hostName");
+						break;
+					}
+				}
+			}
+		} catch (Throwable t) {
+			throw new IllegalStateException("Unable to resolve hostname", t);
+		}
+
+		return hostname;
+	}
+
+	private String getVirtualHostForApplication(String applicationName) {
+		String result = null;
+		throw new UnsupportedOperationException("getVirtualHostForApplication not implemented");
+	}
+
+	private ObjectName getCellObjectName(Session mgmtSession) {
+		String cellPath = String.format("Cell=%s", cellName);
+		return getObjectName(mgmtSession,cellPath);
+	}
+
+	private ObjectName getNodeObjectName(Session mgmtSession) {
+		String containmentPath = String.format("Cell=%s:Node=%s", getCellName(), getNodeName());
+		return getObjectName(mgmtSession,containmentPath);
+
+	}
+
+	private ObjectName getServerObjectName(Session mgmtSession) {
+		String containmentPath = String.format("Cell=%s:Node=%s:Server=%s", getCellName(), getNodeName(), getCurrentServerName());
+		return getObjectName(mgmtSession, containmentPath);
+	}
+
+	private ObjectName getObjectName(Session mgmtSession, String containmentPath) {
+		ObjectName[] objectNames = new ObjectName[0];
+		try {
+			objectNames = configService.resolve(mgmtSession, containmentPath);
+		} catch (Throwable t) {
+			String msg = String.format("Unable to resolve object with path '%s'", containmentPath);
+			throw new IllegalStateException(msg, t);
+		}
+
+		if (objectNames.length != 1) {
+			throw new IllegalStateException(String.format("Unable to find exactly one object with containment path '%s'", containmentPath));
+		}
+		ObjectName requestedObjectName = objectNames[0];
+
+		return requestedObjectName;
+
+	}
+
+	private void discard(Session session) {
+		try {
+			configService.discard(session);
+		} catch (Throwable e) {
+			LOG.error("Unable to discard management session", e);
+		}
+	}
+
+	private ConfigService getConfigService() {
+		ConfigService cs = null;
+		try {
+			cs = ConfigServiceFactory.getConfigService();
+			if (cs == null) {
+				Properties prop = new Properties();
+				prop.setProperty("location", "local");
+				cs = ConfigServiceFactory.createConfigService(true, prop);
+			}
+		}
+		catch (AdminException e) {
+			String msg = "Unable to create ConfigService.";
+			LOG.error(msg, e);
+			throw new IllegalStateException(msg, e);
+		}
+		return cs;
+	}
+
+}
+-------------
+
+- Create utility classes (Endpoint, ServerInfo, AttributeMap,
+  WAS8Endpoints, PortExtractorStrategy):
+
+[source,java]
+-------------
+public class Endpoint {
+	public String name;
+	public String hostname;
+	public Integer port;
+
+	@Override
+	public String toString() {
+		StringBuilder builder = new StringBuilder();
+		builder.append("Endpoint [name=");
+		builder.append(name);
+		builder.append(", hostname=");
+		builder.append(hostname);
+		builder.append(", port=");
+		builder.append(port);
+		builder.append("]");
+		return builder.toString();
+	}
+}
+-------------
+
+[source,java]
+-------------
+public class ServerInfo {
+	public String serverName;
+	public String hostname;
+	public Integer http_port;
+	public Integer https_port;
+
+	public static ServerInfo EMPTY = new ServerInfo();
+
+	@Override
+	public String toString() {
+		StringBuilder builder = new StringBuilder();
+		builder.append("ServerInfo [serverName=");
+		builder.append(serverName);
+		builder.append(", hostname=");
+		builder.append(hostname);
+		builder.append(", http_port=");
+		builder.append(http_port);
+		builder.append(", https_port=");
+		builder.append(https_port);
+		builder.append("]");
+		return builder.toString();
+	}
+}
+-------------
+
+
+[source,java]
+-------------
+import java.util.HashMap;
+import java.util.List;
+
+import javax.management.Attribute;
+import javax.management.AttributeList;
+
+
+public class AttributeMap extends HashMap<String, Object> {
+
+	private static final long serialVersionUID = 1L;
+
+	public AttributeMap() {
+		// nothing
+	}
+
+	public AttributeMap(AttributeList attributeList) {
+		convertAttributeListToAttributeMap(attributeList);
+	}
+
+	private void convertAttributeListToAttributeMap(AttributeList attributeList) {
+		List<Attribute> listOfAttributes = attributeList.asList();
+		for (Attribute attribute : listOfAttributes) {
+			String name = attribute.getName();
+			Object value = attribute.getValue();
+			this.put(name, value);
+		}
+	}
+
+	public <T> T get(String key, Class<T> type) {
+		return type.cast(get(key));
+	}
+}
+-------------
+
+[source,java]
+-------------
+enum WAS8Endpoints {
+	BOOTSTRAP_ADDRESS,
+	SOAP_CONNECTOR_ADDRESS,
+	ORB_LISTENER_ADDRESS,
+	WC_adminhost,
+	WC_defaulthost,
+	WC_adminhost_secure,
+	WC_defaulthost_secure,
+	IPC_CONNECTOR_ADDRESS
+}
+-------------
+
+[source,java]
+-------------
+import java.util.Map;
+
+public class PortExtractorStrategy {
+
+	public Integer getHttpPort(Map<String, Endpoint> endpointMap) {
+		Endpoint endpoint = endpointMap.get(WAS8Endpoints.WC_defaulthost.name());
+		Integer port = (endpoint != null ? endpoint.port : -1 );
+		return port;
+	}
+
+	public Integer getHttpsPort(Map<String, Endpoint> endpointMap) {
+		Endpoint endpoint = endpointMap.get(WAS8Endpoints.WC_defaulthost_secure.name());
+		Integer port = (endpoint != null ? endpoint.port : -1) ;
+		return port;
+	}
+}
+-------------
+
+Now you can use ServerConfigService to retrieve websphere
+configuration data like HTTP or HTTPS ports. Please note that in order
+to invoke ConfigService MBean you need access rights.  You have to
+invoke MBean operations with proper privilages - you have to log in to
+your app as a user that has monitoring right on WAS! How to do that is
+out of the scope of this article. 
+
+Fortunately, there is a point in app lifecycle where you don't need
+those rights but still you can access ConfigService. 
+If you invoke ServerConfigService during application startup you don't
+have to be logged in. So, simply implement servelet context listener
+and invoke ServerConfigService from listener... 
+
+Or, if you use Spring, implement your own
+ApplicationContextInitializer.
+
+
+== Exposing retrieved data to spring apps ==
+
+- Create spring application context initializer that will retrieve WAS
+  metadata and make it available trough spring environment (in other
+  words you can use #{CellName}, #{WC_defaulthost} in your XML files,
+  or you can access those environment entries from Java config using
+  env.getProperty("CellName")):
+
+[source,java]
+-------------
+import java.util.HashMap;
+import java.util.Map;
+
+import javax.servlet.ServletContext;
+
+import org.springframework.context.ApplicationContextInitializer;
+import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.env.PropertySource;
+import org.springframework.web.context.ConfigurableWebApplicationContext;
+
+public class WebsphereEnvironmentAwareApplicationContextInitializer implements ApplicationContextInitializer<ConfigurableWebApplicationContext> {
+
+    @Override
+    public void initialize(final ConfigurableWebApplicationContext applicationContext) {
+
+    	Environment environment = applicationContext.getEnvironment();
+    	if (environment instanceof ConfigurableEnvironment) {
+    		ConfigurableEnvironment confEnv = ConfigurableEnvironment.class.cast(environment);
+    		MutablePropertySources propertySources = confEnv.getPropertySources();
+
+    		Map<String, Object> wasInfoMap = new HashMap<String, Object>();
+    		loadWasProps(wasInfoMap);
+
+    		ServletContext servletContext = applicationContext.getServletContext();
+    		String contextRoot = servletContext.getContextPath();
+		wasInfoMap.put(WebsphereProperty.ContextRoot.name(), contextRoot);
+
+		PropertySource<?> wasPropertySource = new MapPropertySource("websphere-server-info-map", wasInfoMap);
+		propertySources.addFirst(wasPropertySource);
+    	}
+    }
+
+	private void loadWasProps(Map<String, Object> wasInfoMap) {
+		ServerConfigService service = new ServerConfigService();
+		String cellName = service.getCellName();
+		String nodeName = service.getNodeName();
+		String currentServerName = service.getCurrentServerName();
+
+		ServerInfo serverInfo = service.getServerInfo();
+
+		wasInfoMap.put(WebsphereProperty.CellName.name(), cellName);
+		wasInfoMap.put(WebsphereProperty.NodeName.name(), nodeName);
+		wasInfoMap.put(WebsphereProperty.ServerName.name(), currentServerName);
+
+		wasInfoMap.put(WebsphereProperty.HostName.name(), serverInfo.hostname);
+		wasInfoMap.put(WebsphereProperty.WC_defaulthost.name(), serverInfo.http_port);
+		wasInfoMap.put(WebsphereProperty.WC_defaulthost_secure.name(), serverInfo.https_port);
+
+	}
+}
+-------------
+
+- utilty enum: 
+
+[source,java]
+------------
+public enum WebsphereProperty {
+	CellName,
+	NodeName,
+	ServerName,
+	HostName,
+	WC_defaulthost,
+	WC_defaulthost_secure,
+	ContextRoot
+}
+------------
+
+- declare application initializer in web.xml:
+
+[source,xml]
+------------
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app id="WebApp_ID" version="3.0" xmlns="http://java.sun.com/xml/ns/javaee" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://java.sun.com/xml/ns/javaee http://java.sun.com/xml/ns/javaee/web-app_3_0.xsd" metadata-complete="true">
+
+<!-- ... -->
+	<listener>
+		<listener-class>org.springframework.web.context.ContextLoaderListener</listener-class>
+	</listener>
+
+	<context-param>
+		<param-name>contextInitializerClasses</param-name>
+		<param-value>EnvironmentAwareApplicationContextInitializer, WebsphereEnvironmentAwareApplicationContextInitializer</param-value>
+	</context-param>
+<!-- ... -->
+------------
+
+== Saving retrieved data to the database ==
+
+I won't provide complete source code  here, but general idea is to
+declare spring ApplicationListener and save data to the database. You
+can use spring services (and DAOs) in ApplicationListener to store
+application metadata.
+
+
+- in spring java configuration you can reference values previously
+  storeg into spring environment:
+
+[source,java]
+-------------
+import javax.sql.DataSource;
+
+
+....
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationListener;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.event.ApplicationContextEvent;
+import org.springframework.core.env.Environment;
+import org.springframework.web.util.UriComponentsBuilder;
+
+/**
+ * Writes configuration data for currently running application into database.
+ *
+ * @author ilonca
+ */
+@Configuration
+public class ApplicationLifecycleConfiguration {
+
+	public static final String DS = "DBDS";
+	public static final String BEAN_APPLICATION_DAO = "applicationDAO";
+
+	@Autowired
+	private Environment env;
+
+	@Autowired
+	@Qualifier(DS)
+	private DataSource appDs;
+
+	@Autowired
+	private ApplicationDAO applicationDao;
+
+	@Autowired
+	private ServiceApplicationInstanceDAO applicationInstanceDao;
+
+	@Value("${applicationName}")
+	private String applicationName;
+
+        // notice how we're referencing WAS configuration data - it's
+        // available in spring environment, and we're referencing
+        // property values!
+	private @Value("${CellName}") String cellName;
+	private @Value("${NodeName}") String nodeName;
+	private @Value("${ServerName}") String serverName;
+	private @Value("${WC_defaulthost}") String httpPort;
+	private @Value("${WC_defaulthost_secure}") String httpsPort;
+	private @Value("${HostName}") String hostName;
+	private @Value("${ContextRoot}") String contextRoot;
+
+	private @Value("${REMOTE_SECURE}") Boolean useSecurePorts;	
+
+	@Bean
+	public ApplicationListener<ApplicationContextEvent> applicationConfigurationPersister() {
+		ApplicationConfigurationPersister persister = new ApplicationConfigurationPersister(applicationConfigurationService(), application(), applicationInstance());
+		return persister;
+	}
+
+	@Bean
+	public ApplicationConfigurationService applicationConfigurationService() {
+		return new ApplicationConfigurationServiceImpl(applicationDao, applicationInstanceDao);
+	}
+
+	@Bean
+	public ServiceApplication application() {
+		ServiceApplication serviceApplication = new ServiceApplication(applicationName, "automatically set from application", null);
+		return serviceApplication;
+	}
+
+	@Bean
+	public ServiceApplicationInstance applicationInstance()	{
+		String serverIdentifier = cellName + "/" + nodeName + "/" + serverName;
+		String appIdentifier = applicationName;
+		String port = httpPort;
+		boolean isSecure = useSecurePorts;
+		if (isSecure) {
+		    port = httpsPort;
+		}
+		ServiceApplicationInstance instance = new ServiceApplicationInstance(serverIdentifier, appIdentifier);
+		return instance;
+	}
+
+}
+-------------
+
+- implement ApplicationListener that will actually store data into DB
+  when application is started:
+
+[source,java]
+-------------
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationListener;
+import org.springframework.context.event.ApplicationContextEvent;
+import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.context.event.ContextStartedEvent;
+import org.springframework.context.event.ContextStoppedEvent;
+import org.springframework.scheduling.annotation.Async;
+
+public class ApplicationConfigurationPersister implements ApplicationListener<ApplicationContextEvent> {
+
+	private static final Logger LOG = LoggerFactory.getLogger(ApplicationConfigurationPersister.class);
+
+	private ApplicationConfigurationService applicationConfigurationService;
+	private ServiceApplication serviceApp;
+
+	private ServiceApplicationInstance serviceApplicationInstance;
+
+	public ApplicationConfigurationPersister(ApplicationConfigurationService applicationConfigurationService, ServiceApplication serviceApp, ServiceApplicationInstance serviceApplicationInstance) {
+		this.applicationConfigurationService = applicationConfigurationService;
+		this.serviceApp = serviceApp;
+		this.serviceApplicationInstance = serviceApplicationInstance;
+	}
+
+	@Override
+	public void onApplicationEvent(ApplicationContextEvent event) {
+		if (event instanceof ContextStartedEvent) {
+			onContextStart((ContextStartedEvent)event);
+		}
+		else if (event instanceof ContextStoppedEvent) {
+			onContextStop((ContextStoppedEvent)event);
+		}
+		else if (event instanceof ContextRefreshedEvent) {
+			onContextRefresh((ContextRefreshedEvent) event);
+		}
+
+	}
+
+	private void onContextRefresh(ContextRefreshedEvent event) {
+		LOG.info("application context refreshed");
+		applicationConfigurationService.saveApplicationSettings(serviceApp, serviceApplicationInstance);
+	}
+
+
+	private void onContextStart(ContextStartedEvent event) {
+		LOG.info("application context started");
+
+	}
+
+	private void onContextStop(ContextStoppedEvent event) {
+		LOG.info("application context stopped");
+
+	}
+}
+-------------
+
+
+== Exposing remote service ==
+
+Let's expose remote ManagementService:
+
+[source,java]
+-------------
+public interface ManagementService {
+
+    String serviceStatus() throws ManagementException;
+
+    void startService() throws ManagementException;
+
+    void stopService() throws ManagementException;
+
+    void startJmsContainer() throws ManagementException;
+
+    void stopJmsContainer() throws ManagementException;
+}
+------------
+
+Notice that you have to provide managementService bean that implements
+desired remote service interface. If you're interested what it does:
+the concrete implementation allows us to ask for internal service
+status and to start/stop spring default messsage listener container on
+specific server or all servers. This allows us to control how JMS
+messages are consumed in our system. There are other interfaces, but
+this is enough to give you an idea how to use it in your own system.
+
+Add something similar to the following code to the
+RemotingConfiguration.java:
+
+[source,java]
+-------------
+@Configuration("remotingConfiguration")
+@Import({ RemotingHttpClientConfiguration.class })
+@EnableAsync
+public class RemotingConfiguration {
+    public static final String CLUSTER_MANAGEMENT_SERVICE = "clusterManagementService";
+    public static final String SERVICE_PROXY_FACTORY = "serviceProxyFactory";
+    public static final String HESSIAN_DEBUG = "HESSIAN_DEBUG";
+
+    @Autowired
+    private ObjectFactory<HttpClient> httpClientFactory;
+
+    @Autowired
+    private Environment env;
+
+    @Autowired
+    private ManagementService managementService;
+    @Autowired
+    private ClusterManagementService clusterManagementService;
+
+
+    @Bean
+    public RemoteExporter serviceExporter() {
+        HttpInvokerServiceExporter exporter = new HttpInvokerServiceExporter();
+        exporter.setService(managementService);
+        exporter.setServiceInterface(ManagementService.class);
+        exporter.setAcceptProxyClasses(true);
+
+        return exporter;
+    }
+}
+-------------
+
+Now, you only need a way to invoke that service on each server. In
+order to do that let's create ClusterManagementService:
+
+[source,java]
+-------------
+public interface ClusterManagementService {
+
+	Map<String, String> startCluster();
+
+	Map<String, String> stopCluster();
+
+	Map<String, String> statusCluster();
+
+	Map<String, String> startOn(String serverId);
+
+	Map<String, String> stopOn(String serverId);
+
+	Map<String, String> startJms();
+
+	Map<String, String> stopJms();
+
+	Map<String, String> startJmsOn(String serverId);
+
+	Map<String, String> stopJmsOn(String serverId);
+}
+-------------
+
+Yeah, it's almost the same interface as the one above.
+We need a way to invoke service on specific server
+(serverId parameter) and
+we need to know what's the result of remote service invocation on
+specific server (each method returns map of <serverId,invocation
+status>). 
+
+
+This can be better written, and written in more generic way
+but let's keep it simple for now...
+
+Here's the snippet from ClusterManagementService implemenation:
+
+[source,java]
+-------------
+public class ClusterManagementServiceImpl implements ClusterManagementService {
+    private static final Logger LOG = LoggerFactory.getLogger(ClusterManagementServiceImpl.class);
+    // 
+    private ApplicationDAO applicationDao;
+    private ServiceApplicationInstanceDAO applicationInstanceDao;
+
+    @Autowired
+    private ServiceApplication currentApplication;
+
+    @Autowired
+    @Qualifier(RemotingConfiguration.SERVICE_PROXY_FACTORY)
+    private ServiceProxyFactory<ManagementService> serviceProxyFactory;
+
+    // ...
+
+    @Override
+    public Map<String, String> startCluster() {
+	ServiceExecutable task = startTask();
+	return invokeOnCluster(task);
+    }
+
+    private ServiceExecutable startTask() {
+	ServiceExecutable task = new ServiceExecutable() {
+	    @Override
+	    public String execute(ManagementService managementService) throws ManagementException {
+		managementService.startService();
+		return "start invoked";
+	    }
+	};
+	return task;
+    }
+    
+    @Override
+    public Map<String, String> startOn(String serverId) {
+	ServiceExecutable task = startTask();
+
+	return invokeOnServer(serverId, task);
+    }
+
+
+    private Map<String, String> invokeOnCluster(ServiceExecutable task) {
+	Map<String, String> statusMap = new HashMap<String, String>();
+
+	Map<String, ManagementService> clusterServices = loadCluster();
+
+	Set<String> servers = clusterServices.keySet();
+	for (String server : servers) {
+	    ManagementService managementService = clusterServices.get(server);
+	    try {
+		String status = task.execute(managementService);
+		statusMap.put(server, status);
+	    } catch (Throwable t) {
+		String msg = "Error occured while invoking service on server '" + server + "'";
+		LOG.error(msg, t);
+		statusMap.put(server, msg);
+	    }
+	}
+
+	return statusMap;
+    }
+
+    private Map<String, String> invokeOnServer(String serverId, ServiceExecutable task) {
+	Map<String, String> statusMap = new HashMap<String, String>();
+
+	Map<String, ManagementService> clusterServices = loadCluster();
+
+	String msg = "Unable to retrieve management service for server with id: " + serverId;;
+
+	ManagementService managementService = clusterServices.get(serverId.trim());
+	if (null != managementService) {
+	    try {
+		msg = task.execute(managementService);
+	    }
+	    catch (Throwable t) {
+		msg = "Error occured while invoking service on server '" + serverId + "'";
+		LOG.error(msg, t);
+	    }
+	}
+	statusMap.put(serverId, msg);
+
+	return statusMap;
+    }
+
+    private Map<String, ManagementService> loadCluster() {
+	Map<String, ManagementService> cluster = new HashMap<String, ManagementService>();
+	try {
+	    currentApplication = applicationDao.load(currentApplication.getApplicationName());
+	    List<ServiceApplicationInstance> instances = applicationInstanceDao.loadInstances(currentApplication);
+	    for (ServiceApplicationInstance instance : instances) {
+		String managementUrl = instance.getInstanceManagementUrl();
+		ManagementService serviceProxy = serviceProxyFactory.getService(managementUrl);
+		if (null == serviceProxy) {
+		    LOG.error("Unable to create service proxy for {}", managementUrl);
+		}
+		else {
+		    cluster.put(instance.getServerIdentifier(), serviceProxy);
+		}
+	    }
+	} catch (Throwable t) {
+	    LOG.error("Unable to load cluster configuration.", t);
+	}
+
+	return cluster;
+    }
+
+    abstract class ServiceExecutable {
+	public abstract String execute(ManagementService managementService) throws ManagementException;
+    }
+
+
+-------------
+
+Notice how we're using serviceProxyFactory in order to call remote
+service. ServiceProxyFactory is actually:
+[source,java]
+-------------
+public interface ServiceProxyFactory<T> {
+
+	public abstract T getService(String serviceUrl) throws MalformedURLException;
+}
+-------------
+
+
+I have implemented Hessian and HttpInvoker serviceProxyFactories:
+
+[source,java]
+-------------
+
+import java.net.MalformedURLException;
+
+import org.apache.http.client.HttpClient;
+import org.springframework.beans.factory.ObjectFactory;
+import org.springframework.remoting.httpinvoker.HttpComponentsHttpInvokerRequestExecutor;
+import org.springframework.remoting.httpinvoker.HttpInvokerProxyFactoryBean;
+import org.springframework.remoting.httpinvoker.HttpInvokerRequestExecutor;
+
+public class HttpInvokerServiceProxyFactory<T> implements ServiceProxyFactory<T> {
+    private Class<T> typeRef;
+    private ObjectFactory<HttpClient> httpClientFactory;
+
+    public HttpInvokerServiceProxyFactory(Class<T> typeRef, ObjectFactory<HttpClient> httpClientFactory) {
+	this.typeRef = typeRef;
+	this.httpClientFactory = httpClientFactory;
+    }
+
+    @Override
+    public T getService(String serviceUrl) throws MalformedURLException {
+	HttpInvokerProxyFactoryBean proxyFactory = new HttpInvokerProxyFactoryBean();
+	proxyFactory.setServiceUrl(serviceUrl);
+	proxyFactory.setServiceInterface(typeRef);
+
+	HttpInvokerRequestExecutor httpInvokerRequestExecutor = httpInvokerRequestExecutor();
+	proxyFactory.setHttpInvokerRequestExecutor(httpInvokerRequestExecutor);
+	proxyFactory.afterPropertiesSet();
+	Object object = proxyFactory.getObject();
+
+	return typeRef.cast(object);
+    }
+
+    private HttpInvokerRequestExecutor httpInvokerRequestExecutor() {
+	HttpClient httpClient = httpClientFactory.getObject();
+	HttpComponentsHttpInvokerRequestExecutor executor = new HttpComponentsHttpInvokerRequestExecutor(httpClient);
+	return executor;
+    }
+
+}
+-------------
+
+HessianServiceProxyFactory uses hessian over apache http client
+library (available from https://github.com/ilx/hessian-httpclient)
+
+[source,java]
+-------------
+import java.net.MalformedURLException;
+
+import org.apache.http.client.HttpClient;
+import org.springframework.beans.factory.ObjectFactory;
+
+import com.caucho.hessian.client.HessianConnectionFactory;
+import com.caucho.hessian.client.HessianProxyFactory;
+
+public class HessianServiceProxyFactory<T> implements ServiceProxyFactory<T> {
+
+	private Class<T> typeRef;
+	private ObjectFactory<HttpClient> httpClientFactory;
+	private boolean isDebug;
+
+	public HessianServiceProxyFactory(Class<T> typeRef, ObjectFactory<HttpClient> httpClientFactory) {
+		this.typeRef = typeRef;
+		this.httpClientFactory = httpClientFactory;
+	}
+
+	@SuppressWarnings("unchecked")
+	@Override
+	public T getService(String serviceUrl) throws MalformedURLException {
+		HessianProxyFactory hessianProxyFactory = new HessianProxyFactory();
+
+		HttpClient httpClient = httpClientFactory.getObject();
+		HessianConnectionFactory hessianConnectionFactory = new HttpClientHessianConnectionFactory(httpClient);
+		hessianProxyFactory.setConnectionFactory(hessianConnectionFactory);
+
+		hessianProxyFactory.setDebug(isDebug);
+
+		return (T) hessianProxyFactory.create(typeRef, serviceUrl);
+	}
+
+	public void setDebug(boolean isDebug) {
+		this.isDebug = isDebug;
+	}
+
+}
+-------------
+
+ClusterManagementService implementation needs access to
+serviceProxyFactory and we might want to expose it as a remote service
+also.  Add something similar to the following snippet to the
+RemotingConfiguration.java:
+
+[source,java]
+-------------
+    @Bean(name = SERVICE_PROXY_FACTORY)
+    public ServiceProxyFactory<ManagementService> serviceProxyFactory() {
+        ServiceProxyFactory<ManagementService> proxyFactory = new HttpInvokerServiceProxyFactory<ManagementService>(
+                ManagementService.class, httpClientFactory);
+        return proxyFactory;
+    }
+
+
+    /**
+     * ClusterManagementService exposed through HttpInvoker. This will enable
+     * other apps to access ClusterManagementService.
+     */
+    @Bean
+    public RemoteExporter clusterManagementServiceExporter() {
+        HttpInvokerServiceExporter exporter = new HttpInvokerServiceExporter();
+        exporter.setService(clusterManagementService);
+        exporter.setServiceInterface(ClusterManagementService.class);
+        exporter.setAcceptProxyClasses(true);
+
+        return exporter;
+    }
+-------------
+
+
+Now take a deep breath and think about all this... 
+
+
+There's something else I want to share. Think about how you want to
+invoke ManagementService operations.
+
+You want to invoke it's operations, but you probably don't want to
+wait until invocation finishes! That might take too long and you
+probably don't want your https session to timeout!
+
+That's why I made ManagementService operations @Async:
+
+[source,java]
+-------------
+
+public class ManagementServiceImpl implements ManagementService {
+
+    @Async
+    public void stopService() throws ManagementException {
+	try {
+            // stop jms container
+            // release resources
+        } catch (Throwable t) {
+	    String msg = "Unable to stop service.";
+	    LOGGER.error(msg, t);
+	    throw new ManagementException(msg, t);
+	}
+        // ....
+    }
+
+    // ....
+
+}
+-------------
+
+
+For those who need it: The code posted here is available under Apache License, version 2.0
+(http://www.apache.org/licenses/LICENSE-2.0.html). Feel free to use it
+however you want.
+
+
+== Reference ==
+
+ - http://www.ibm.com/developerworks/websphere/techjournal/0307_wang/wang.html
+ - http://www.ibm.com/developerworks/websphere/library/techarticles/0606_efremenko/0606_efremenko.html
+ - ConfigService javadoc: http://pic.dhe.ibm.com/infocenter/wasinfo/v6r1/index.jsp?topic=%2Fcom.ibm.websphere.javadoc.doc%2Fpublic_html%2Fapi%2Fcom%2Fibm%2Fwebsphere%2Fmanagement%2Fconfigservice%2FConfigService.html
+ - http://webspherescript.wordpress.com/2011/09/29/how-to-list-and-edit-endpoint-with-wsadmin-and-jython/
+ - http://pic.dhe.ibm.com/infocenter/wasinfo/v6r0/index.jsp?topic=%2Fcom.ibm.websphere.javadoc.doc%2Fconfigdoc%2Fconfigdocinfo.html
+ - http://pic.dhe.ibm.com/infocenter/wasinfo/v6r1/index.jsp?topic=%2Fcom.ibm.websphere.javadoc.doc%2Fpublic_html%2Fapi%2Fcom%2Fibm%2Fwebsphere%2Fmanagement%2Fconfigservice%2FConfigService.html
+ - http://www.trainologic.com/blog/2009/06/15/managing-websphere-6-resources-with-jmx-how-to-part-1/
+ - http://www.trainologic.com/blog/?s=Managing%20WebSphere%206%20Resources%20with%20JMX%20-%20How%20to%20%28part%202%29
+ - http://pic.dhe.ibm.com/infocenter/wasinfo/v8r0/index.jsp?topic=%2Fcom.ibm.websphere.base.doc%2Finfo%2Faes%2Fae%2Ftdat_cjmxapis.html
+ - http://www-01.ibm.com/support/docview.wss?uid=swg21411254
+ - http://www.zomeon.com/2831412/does-anyone-have-some-jmx-code-for-creating-a-new-websphere-datasource
+ - http://stackoverflow.com/questions/11397348/how-do-i-add-a-notificationlistener-to-an-mbean-on-websphere-7-the-listeners-a
+ - http://www.edu4eng.com/articles/WAS/scripts/mbeans/Overview.html
+ - https://community.jboss.org/thread/49441
+ - how to retrieve port numbers: http://pic.dhe.ibm.com/infocenter/wasinfo/v6r1/index.jsp?topic=%2Fcom.ibm.websphere.express.doc%2Finfo%2Fexp%2Fae%2Ftxml_portnumber.html
+ - http://blog.xebia.com/2009/11/23/websphere-scripting-with-wsadmin-containment-paths-configuration-ids-and-object-names/
+ - https://www.ibm.com/developerworks/community/forums/html/topic?id=77777777-0000-0000-0000-000013725041
+

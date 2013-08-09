@@ -1,0 +1,13 @@
+
+Developing REST services
+========================
+
+- http://java.dzone.com/articles/how-make-web-service-spring[How to
+  Make a Web Service with Spring MVC and Test with Spring Test
+  Framework]
+
+- http://weblog4j.com/2012/03/15/developing-restful-services-using-apache-cxf/[Developing
+  RESTful Services using Apache CXF]
+
+- http://weblog4j.com/2012/05/01/developing-soap-web-service-using-apache-cxf/[Developing
+  SOAP Web service using Apache CXF] 

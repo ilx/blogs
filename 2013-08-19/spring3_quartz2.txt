@@ -1,0 +1,550 @@
+How to use Quartz 2.2 with Spring 3.2.x on WebSphere
+====================================================
+
+We would like to use Quartz scheduler in a Spring 3.2.x application.
+Target environment is WebSphere Application server 8.0.x, Oracle DB
+11s.
+
+Let's pretend we would like to execute simple Echo service at fixed
+interval.
+
+Here's the service we would like to execute:
+[source,java]
+-------------
+import org.quartz.Job;
+import org.quartz.JobExecutionContext;
+import org.quartz.JobExecutionException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class EchoService implements Job {
+
+    public static final Logger LOG = LoggerFactory.getLogger(EchoService.class);
+
+    @Override
+    public void execute(JobExecutionContext jobContext) throws JobExecutionException {
+        LOG.error("echo service invoked");
+    }
+
+}
+-------------
+
+For now, we will use mix of Spring XML configuration and Java configuration.
+
+[source,java]
+-------------
+import static org.quartz.CronScheduleBuilder.*;
+import static org.quartz.TriggerBuilder.*;
+
+import java.io.IOException;
+import java.util.Properties;
+import java.util.concurrent.Executor;
+
+import javax.annotation.PostConstruct;
+import javax.sql.DataSource;
+
+import org.quartz.JobDetail;
+import org.quartz.Trigger;
+import org.quartz.commonj.WorkManagerThreadExecutor;
+import org.quartz.impl.StdSchedulerFactory;
+import org.quartz.impl.jdbcjobstore.oracle.OracleDelegate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.InitializingBean;
+import org.springframework.beans.factory.config.PropertiesFactoryBean;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.ApplicationContextAware;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.scheduling.quartz.JobDetailFactoryBean;
+import org.springframework.scheduling.quartz.LocalDataSourceJobStore;
+import org.springframework.scheduling.quartz.SchedulerFactoryBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.util.Assert;
+
+@Configuration
+public class QuartzSchedulingConfiguration implements InitializingBean, ApplicationContextAware {
+    public static final String BEAN_QUARTZ_SCHEDULER = "myQuartzScheduler";
+    public static final String BEAN_ECHO_JOB = "echoJob";
+    public static final String QUARTZ_SCHEDULER_NAME = "my-quartz-scheduler";
+    public static final String QUARTZ_DEFAULT_JOB_GROUP = "my-quartz-default-group";
+
+    private static final Logger LOG = LoggerFactory.getLogger(QuartzSchedulingConfiguration.class);
+    // for cron syntax see http://quartz-scheduler.org/documentation/quartz-2.2.x/tutorials/tutorial-lesson-06
+    // to ease creation of cron expressions use use http://www.cronmaker.com/
+    private static final String QUARTZ_CRON_EVERY_10_SECONDS = "0/10 * * * * ?";
+    private static final String QUARTZ_CRON_EVERY_5_MINUTES = "0 0/5 * * * ?";
+    private static final String QUARTZ_CRON_EVERY_DAY_AT_6_AM = "0 0 6 1/1 * ? *";
+
+    private DataSource quartzDataSource;
+    private PlatformTransactionManager quartzTransactionManager;
+    private Executor quartzTaskExecutor;
+    private ApplicationContext applicationContext;
+
+    @PostConstruct
+    public void init() {
+        LOG.info("QuartzSchedulingConfiguration initialized.");
+    }
+
+    @Bean(name=BEAN_QUARTZ_SCHEDULER)
+    public SchedulerFactoryBean myQuartzScheduler() { // <1>
+        SchedulerFactoryBean quartzScheduler = new SchedulerFactoryBean();
+
+        quartzScheduler.setDataSource(quartzDataSource);
+        quartzScheduler.setTransactionManager(quartzTransactionManager);
+        quartzScheduler.setOverwriteExistingJobs(true);
+        quartzScheduler.setAutoStartup(true);
+        quartzScheduler.setSchedulerName(QUARTZ_SCHEDULER_NAME);
+
+        quartzScheduler.setTaskExecutor(quartzTaskExecutor); // <5>
+
+        // custom job factory of spring with DI support for
+        // @Autowired!
+        // <2>
+        AutowiringSpringBeanJobFactory jobFactory = new AutowiringSpringBeanJobFactory();
+        jobFactory.setApplicationContext(applicationContext);
+        quartzScheduler.setJobFactory(jobFactory);
+
+        quartzScheduler.setQuartzProperties(quartzProperties());
+
+        JobDetail[] jobDetails = {statisticCalculationJob().getObject()};
+        quartzScheduler.setJobDetails(jobDetails);
+
+        Trigger[] triggers = { statisticCalculationTrigger() };
+        quartzScheduler.setTriggers(triggers);
+
+        // TODO: add quartz job listeners that will log when jobs have started and when they've ended...
+
+        return quartzScheduler;
+    }
+
+    @Bean(name=BEAN_ECHO_JOB)
+    public JobDetailFactoryBean statisticCalculationJob() {
+        JobDetailFactoryBean jobDetailFactory = new JobDetailFactoryBean();
+        jobDetailFactory.setJobClass(EchoJob.class);
+        jobDetailFactory.setGroup(QUARTZ_DEFAULT_JOB_GROUP);
+        jobDetailFactory.setDescription("Invoke Echo service...");
+        jobDetailFactory.setDurability(true);
+
+        return jobDetailFactory;
+    }
+
+    @Bean
+    public Trigger statisticCalculationTrigger() {
+        // TODO: should we use PersistableCronTriggerFactoryBean?
+        // @formatter:off
+        Trigger trigger = newTrigger()
+                .withIdentity("echo-service-trigger", QUARTZ_DEFAULT_JOB_GROUP)
+                .withSchedule(
+                        cronSchedule(QUARTZ_CRON_EVERY_5_MINUTES)
+                            .withMisfireHandlingInstructionFireAndProceed()
+                        )
+                .forJob(statisticCalculationJob().getObject())
+                .build();
+        // @formatter:on
+
+        return trigger;
+    }
+
+    @Bean
+    public Properties quartzProperties() {
+        // TODO: fix overcomplicated loading of quartz configuration
+        // properties
+        PropertiesFactoryBean propertiesFactoryBean = new PropertiesFactoryBean();
+        propertiesFactoryBean.setLocation(new ClassPathResource("/quartz.properties"));
+        Properties properties = null;
+        try {
+            propertiesFactoryBean.afterPropertiesSet();
+            properties = propertiesFactoryBean.getObject();
+        } catch (IOException e) {
+            LOG.warn("Cannot load quartz.properties.");
+        }
+        if (null == properties) {
+            properties = new Properties();
+        }
+
+        // override loaded properties
+        configureConcurrency(properties); // <3>
+        configureJobStore(properties);
+        configureClustering(properties);
+
+
+        return properties;
+    }
+
+    private void configureConcurrency(Properties properties) {
+        // see http://jira.terracotta.org/jira/browse/QTZ-113
+        // see http://jira.terracotta.org/jira/browse/QTZ-194
+        // see http://stackoverflow.com/questions/175880/unmanaged-threads-spring-quartz-websphere-hibernate
+        properties.put(StdSchedulerFactory.PROP_THREAD_EXECUTOR_CLASS, WorkManagerThreadExecutor.class.getCanonicalName()); // <4>
+        properties.put(StdSchedulerFactory.PROP_THREAD_EXECUTOR + ".workManagerName", "java:comp/env/MyQuartz_WM");
+    }
+
+    private void configureJobStore(Properties properties) {
+        properties.put(StdSchedulerFactory.PROP_JOB_STORE_USE_PROP, Boolean.TRUE); // <9>
+        properties.put(StdSchedulerFactory.PROP_JOB_STORE_CLASS , LocalDataSourceJobStore.class.getCanonicalName());
+        properties.put(StdSchedulerFactory.PROP_JOB_STORE_PREFIX + ".tablePrefix", "MYSCHEMA.QRTZ_"); // <7>
+        properties.put(StdSchedulerFactory.PROP_JOB_STORE_PREFIX + ".isClustered", Boolean.TRUE); // <8>
+        properties.put(StdSchedulerFactory.PROP_JOB_STORE_PREFIX + ".driverDelegateClass", OracleDelegate.class.getCanonicalName());
+    }
+
+    private void configureClustering(Properties properties) {
+        /*
+         * IMPORTANT: Never run clustering on separate machines,
+         * unless their clocks are synchronized using some form
+         * of time-sync service (daemon) that runs very regularly
+         * (the clocks must be within a second of each other).
+         *
+         * See http://www.boulder.nist.gov/timefreq/service/its.htm
+         * if you are unfamiliar with how to do this.
+         *
+         * Never start (scheduler.start()) a non-clustered instance
+         * against the same set of database tables that any other
+         * instance is running (start()ed) against.
+         *
+         * You may get serious data corruption, and will definitely
+         * experience erratic behavior.
+         */
+        properties.put(StdSchedulerFactory.PROP_SCHED_INSTANCE_ID, "AUTO");
+        properties.put(StdSchedulerFactory.PROP_SCHED_INSTANCE_NAME, QUARTZ_SCHEDULER_NAME);
+
+        properties.put("org.quartz.jobStore.misfireThreshold", "60000");
+        properties.put("org.quartz.jobStore.clusterCheckinInterval", "20000");
+
+        properties.put(StdSchedulerFactory.PROP_SCHED_RMI_EXPORT, Boolean.FALSE);
+        properties.put(StdSchedulerFactory.PROP_SCHED_RMI_PROXY, Boolean.FALSE);
+    }
+
+    // <6>
+    public void setQuartzDataSource(final DataSource quartzDataSource) {
+        this.quartzDataSource = quartzDataSource;
+    }
+
+    public void setQuartzTransactionManager(final PlatformTransactionManager quartzTransactionManager) {
+        this.quartzTransactionManager = quartzTransactionManager;
+    }
+
+    public void setQuartzTaskExecutor(final Executor quartzTaskExecutor) {
+        this.quartzTaskExecutor = quartzTaskExecutor;
+    }
+
+    @Override
+    public void afterPropertiesSet() throws Exception {
+        Assert.notNull(this.quartzDataSource, "Quartz data source must be set");
+        Assert.notNull(this.quartzTransactionManager, "Quartz transaction manager must be set");
+        Assert.notNull(this.quartzTaskExecutor, "Quartz task executor must be set");
+    }
+
+    @Override
+    public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
+        this.applicationContext = applicationContext;
+    }
+}
+-------------
+<1> myQuartzScheduler is spring provided bean factory where all
+    configuration magic happens
+<2> when jobs get created they're not spring aware by default. We want
+    to use spring DI - this will give us a way to autowire spring
+    managed deps into our jobs. This AutowiringSpringBeanJobFactory is
+    missing link that will give more power to our jobs.
+<3> we could configure quartz using quartz.properties, but I wanted to
+    configure concurrency in the configuration class. If you would
+    like to use quartz.properties file based configuration remember to
+    comment following lines since they will override properties from
+    quartz.properties.
+<4> when running in WAS or WebLogic it's probably good idea to use
+    application server managed threads - by default Quartz doesn't use
+    managed threads for all of the threads. Here we configure it to
+    use managed threads for MisfireHandler and ClusterManager
+<5> as in comment under <4> - we need to tell Quartz scheduler to
+    execute jobs as application managed threads - here we're telling
+    it to use spring provided thread executor
+<6> in order to configure quartz we need to provide: datasource,
+    transaction manager and task executor
+<7> notice non-default prefix for quartz tables!
+<8> make sure we use cluster aware scheduler!
+<9> this may cause some problems, see
+    http://www.objectpartners.com/2013/07/09/configuring-quartz-2-with-spring-in-clustered-mode/[Configuring
+    Quartz 2 with Spring in clustered mode] for more info (PersistableCronTriggerFactoryBean)
+
+
+Here's the AutowiringSpringBeanJobFactory which will allow us to use
+@Autowired and link our jobs to spring DI context:
+
+[source,java]
+-------------
+import org.quartz.spi.TriggerFiredBundle;
+import org.springframework.beans.factory.config.AutowireCapableBeanFactory;
+import org.springframework.context.ApplicationContext;
+import org.springframework.context.ApplicationContextAware;
+import org.springframework.scheduling.quartz.SpringBeanJobFactory;
+
+public final class AutowiringSpringBeanJobFactory extends SpringBeanJobFactory implements ApplicationContextAware {
+
+    private transient AutowireCapableBeanFactory beanFactory;
+
+    @Override
+    public void setApplicationContext(final ApplicationContext context) {
+        beanFactory = context.getAutowireCapableBeanFactory();
+    }
+
+    @Override
+    protected Object createJobInstance(final TriggerFiredBundle bundle) throws Exception {
+        final Object job = super.createJobInstance(bundle);
+        beanFactory.autowireBean(job);
+        return job;
+    }
+}
+-------------
+
+Now, let's wire Quartz configuration into our existing Spring XML
+defined context definition:
+
+[source,xml]
+------------
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:task="http://www.springframework.org/schema/task" xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:jee="http://www.springframework.org/schema/jee"
+	xsi:schemaLocation="http://www.springframework.org/schema/jee http://www.springframework.org/schema/jee/spring-jee-3.2.xsd
+		http://www.springframework.org/schema/task http://www.springframework.org/schema/task/spring-task-3.2.xsd
+		http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.2.xsd
+		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.2.xsd">
+
+	<jee:jndi-lookup id="MyQuartz_WM" jndi-name="MyQuartz_WM" resource-ref="true" />
+
+  	<!-- Tasks -->
+	<bean id="myTaskExecutor" class="org.springframework.scheduling.commonj.WorkManagerTaskExecutor">
+		<property name="workManager" ref="MyQuartz_WM" />
+	</bean>
+
+	<bean id="quartzSchedulingConfiguration" class="QuartzSchedulingConfiguration">
+		<property name="quartzTaskExecutor" ref="myTaskExecutor" />
+		<property name="quartzDataSource" ref="myAppDS" /> <!-- <1> -->
+		<property name="quartzTransactionManager" ref="myTransactionManager" />
+	</bean>
+
+        <!--... -->
+
+</beans>
+------------
+<1> datasource and transaction manager are defined as in typical spring application
+
+
+Of course you would have to define work managers in the application
+server and configure web.xml:
+
+[source,xml]
+------------
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app xmlns="http://java.sun.com/xml/ns/javaee" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://java.sun.com/xml/ns/javaee http://java.sun.com/xml/ns/javaee/web-app_3_0.xsd" version="3.0" metadata-complete="true">
+  <!--.... --->
+
+  <resource-ref>
+    <res-ref-name>myAdminDS</res-ref-name>
+    <res-type>javax.sql.DataSource</res-type>
+    <res-auth>Container</res-auth>
+    <res-sharing-scope>Shareable</res-sharing-scope>
+  </resource-ref>
+
+
+  <resource-ref>
+    <description>Quartz default work manager</description>
+    <res-ref-name>myQuartz_WM</res-ref-name>
+    <res-type>commonj.work.WorkManager</res-type>
+    <res-auth>Container</res-auth>
+    <res-sharing-scope>Shareable</res-sharing-scope>
+  </resource-ref>
+
+  <!-- ... -->
+
+</web-app>
+------------
+
+
+Do not forget ibm-web-bnd.xml:
+
+[source,xml]
+------------
+<?xml version="1.0" encoding="UTF-8"?>
+<web-bnd
+	xmlns="http://websphere.ibm.com/xml/ns/javaee"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://websphere.ibm.com/xml/ns/javaee http://websphere.ibm.com/xml/ns/javaee/ibm-web-bnd_1_1.xsd"
+	version="1.1">
+
+	<virtual-host name="default_host" />
+
+	<resource-ref name="myAdminDS" binding-name="jdbc/myAdminDS" />
+
+  	<resource-ref name="myQuartz_WM" binding-name="wm/myQuartz_WM" />
+
+        <!-- ... etc.... -->
+</web-bnd>
+------------
+
+
+
+
+Schedule an existing job from Spring controller
+-----------------------------------------------
+
+You may want to execute existing jobs from a web UI. Here's how to do
+it from spring controller:
+
+[source,java]
+-------------
+@Controller
+@RequestMapping("/jobs")
+public class MyController {
+
+    @Autowired(required=true)
+    @Qualifier(QuartzSchedulingConfiguration.BEAN_QUARTZ_SCHEDULER)
+    private SchedulerFactoryBean schedulerFactory;
+
+    @Autowired(required=true)
+    @Qualifier(QuartzSchedulingConfiguration.BEAN_ECHO_JOB)
+    private JobDetail echoJob;
+
+    @RequestMapping("/run/{param}")
+    public ModelAndView recalculateStatisticsForLnet(@PathVariable("param") final String param) {
+        final ModelAndView mv = new ModelAndView("redirect:/jobs/all");
+        Map<String, Object> model = mv.getModel();
+
+        // schedule next execution of echo job
+        Trigger runNowTrigger = createTrigger(echoJob, param);
+        JobKey jobKey = echoJob.getKey();
+        String jobName = jobKey.getName();
+        JobDataMap jobDataMap = runNowTrigger.getJobDataMap(); // <1>
+        jobDataMap.put(EchoJob.KEY_PARAM, param);
+        try {
+            Scheduler scheduler = schedulerFactory.getScheduler();
+            scheduler.scheduleJob(statisticCalculationRunNowTrigger);
+            model.put("message", "Calculation of statistics started for : " + param);
+        } catch (org.quartz.ObjectAlreadyExistsException e) { // <2>
+            model.put("message", "Job already running for : " + param);
+	} catch (Exception e) {
+	    throw new IllegalStateException("Unable to schedule job " + jobName, e);
+	}
+
+        return mv;
+    }
+
+    private Trigger createTrigger(JobDetail jobDetail, String someparam) {
+        String triggerId = "my-echo-now-trigger-" + someparam;
+        Trigger trigger = newTrigger()
+                .withIdentity(triggerId, QuartzSchedulingConfiguration.QUARTZ_DEFAULT_JOB_GROUP)
+                .startNow()
+                .forJob(jobDetail)
+                .build();
+
+        return trigger;
+    }
+
+    // .....
+
+}
+-------------
+<1> passing parameter to the job
+<2> detecting already running job
+
+This simple code shows how to run job on a single server in a cluster
+(we get 'cluster wide singleton' job). It also shows us how to pass
+parameter to the job, and it allows us to detect if job is already
+running somewhere in the cluster.
+
+In order to use parameter in our job we may modify EchoJob:
+[source,java]
+-------------
+import org.quartz.Job;
+import org.quartz.JobExecutionContext;
+import org.quartz.JobExecutionException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class EchoService implements Job {
+    public static final String KEY_PARAM = "param";
+
+    public static final Logger LOG = LoggerFactory.getLogger(EchoService.class);
+
+    @Override
+    public void execute(JobExecutionContext jobContext) throws JobExecutionException {
+        String param = (String) context.get(KEY_PARAM); //<1>
+        LOG.error("echo service invoked with param {}", param);
+    }
+
+}
+-------------
+<1> Fetch parameter from job context explicitly
+
+NOTE: From Quartz documentation: If you add setter methods to your job
+class that correspond to the names of keys in the JobDataMap (such as
+a setJobSays(String val) method for the data in the example above),
+then Quartz's default JobFactory implementation will automatically
+call those setters when the job is instantiated, thus preventing the
+need to explicitly get the values out of the map within your execute
+method.
+
+Warnings
+--------
+
+If you have started long running jobs you might see following warning
+messages in logs:
+
+[source,log]
+--------
+[21.08.13. 04:11:44:626 CEST] 00000099 ThreadMonitor W   WSVR0605W: Thread "WorkManager.Admin_WM : 19" (000000ff) has been active for 704328 milliseconds and may be hung.  There is/are 3 thread(s) in total in the server that may be hung.
+	at ....
+	at org.quartz.core.JobRunShell.run(JobRunShell.java:207)
+	at org.springframework.scheduling.commonj.DelegatingWork.run(DelegatingWork.java:61)
+	at com.ibm.ws.asynchbeans.J2EEContext.run(J2EEContext.java:1178)
+	at com.ibm.ws.asynchbeans.WorkWithExecutionContextImpl.go(WorkWithExecutionContextImpl.java:199)
+	at com.ibm.ws.asynchbeans.CJWorkItemImpl.run(CJWorkItemImpl.java:236)
+	at com.ibm.ws.util.ThreadPool$Worker.run(ThreadPool.java:1783)
+[21.08.13. 06:28:57:285 CEST] 000000ff ThreadMonitor W   WSVR0606W: Thread "WorkManager.Admin_WM : 19" (000000ff) was previously reported to be hung but has completed.  It was active for approximately 12536878 milliseconds.  There is/are 2 thread(s) in total in the server that still may be hung.
+--------
+
+This is normal behaviour, no threads are interrupted. Stacktrace is
+printed to ease debug if thread is really stuck. If everything is ok
+message WSVR0606W will be printed when thread finishes its work.
+
+See
+http://stackoverflow.com/questions/3810266/how-does-threadmonitor-work
+for more info. 'com.ibm.websphere.threadmonitor.threshold' is the
+property you may want configure.
+
+Utilities
+---------
+
+Here are some web apps you may find useful:
+
+- http://www.cronmaker.com/[CronMaker] helps you create valid cron
+  expressions
+- http://www.onlineconversion.com/unix_time.htm[Unix time conversion
+  tool] - helps you create unix time value which can be used to
+  manually adjust NEXT_FIRE_TIME of a trigger. 
+
+
+References
+----------
+- http://www.objectpartners.com/2013/07/09/configuring-quartz-2-with-spring-in-clustered-mode/[Configuring Quartz 2 with Spring in clustered mode]
+- https://gist.github.com/jeffsheets/5862630[Gist: Configuring Quartz 2.1.7 with Spring 3.1.3 in clustered mode]
+- https://gist.github.com/jelies/5085593[Gist: Quartz (2.1.6) java config with spring (3.2.1). Using a SpringBeanJobFactory to automatically autowire quartz classes.]
+
+- http://forum.springsource.org/showthread.php?53160-Spring-s-Quartz-Integration-how-to-schedule-new-jobs-programmatically[Spring's Quartz Integration: how to schedule new jobs programmatically]
+- http://blog.btmatthews.com/?p=40[Inject application context dependencies in Quartz job beans]
+
+- http://sloanseaman.com/wordpress/2011/06/06/spring-and-quartz-and-persistence/[Spring, Quartz, and Persistence]
+  - http://devtrigger.blogspot.com/2012/02/spring-31-with-quartz-212.html[Springframework 3.1 with quartz 2.1.2 ]
+
+
+- http://stackoverflow.com/questions/175880/unmanaged-threads-spring-quartz-websphere-hibernate[Unmanaged Threads Spring Quartz Websphere Hibernate]
+  - http://jira.terracotta.org/jira/browse/QTZ-113[Quartz starts unmanaged threads and J2EE context is not propagated to the job threads]
+  - http://jira.terracotta.org/jira/browse/QTZ-194[Quartz starts unmanaged threads in JobStoreSupport]
+
+
+
+
+

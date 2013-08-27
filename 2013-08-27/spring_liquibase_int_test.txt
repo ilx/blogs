@@ -1,0 +1,11 @@
+Integration tests with Spring and Liquibase
+===========================================
+
+
+
+References
+----------
+
+- http://gordondickens.com/wordpress/2013/02/28/database-config-spring-3-2-environment-profiles[Database Configuration with Spring 3.2 Environment Profiles]
+- http://gordondickens.com/wordpress/2011/01/07/junit-spring-what-you-dont-know-about/[JUnit & Spring – What You Don’t Know]
+

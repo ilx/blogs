@@ -1,0 +1,125 @@
+SSO
+===
+
+Introduction
+------------
+
+Provide evaluation of SSO solutions for .NET and Java applications.
+Must support AIX, IHS, identity propagation across application
+servers.  Must support IIS, ASP.NET MVC, SPNEGO.  Must have UI for
+management of identities, applications, roles, policies.
+
+
+- SSO - Single sign-on (SSO) is a way to authenticate users on
+  multiple related, but independent software systems. Once logged in,
+  a user can switch from one system to the next without the need to
+  login again. Conversely, single sign-off is a way to log out and
+  terminate access to multiple software systems with a single sign-off
+  action. 
+  
+  In contrast, a shared authentication scheme that requires the user
+  to log in multiple times using the same identity is not called SSO.
+  An example is a central user directory such as Active Directory,
+  where users login to their Windows desktop, then enter login name
+  and password again to login into an application using the same
+  credentials
+  
+  (from
+  http://twiki.org/cgi-bin/view/Blog/BlogEntry201206x1[How to: Single
+  Sign-on, a Convenient Way to Authenticate Users])
+
+- Benefits - There are many benefits in favor of SSO:
+ - Usability: Users only need to remember one login and password. 
+ - Security:  Centralized reporting for compliance adherence. SSO reduces the risk of phishing because users do not need to login multiple times.
+ - Productivity: Reduced time spent re-entering passwords. Reduced IT costs due to lower number of IT help desk calls related to passwords.
+ - _Overall productivity_: SSO allows us to develop modular
+   portal-like applications. This allows us to decouple software
+   functionality, faster turnarounds, bug fixes...
+
+- Disadvantages: There are also disadvantages. 
+ - An obvious one is single point of failure: All systems go down if the SSO authentication server fails.
+ - Another one is security: All systems will be accessible by an intruder if a user account is compromised.
+
+
+
+- Reverse proxy ?
+- Proxy authentication support ?
+- Federated Single Sign-on - systems are designed to work when the
+Identity Provider and Service Provider are NOT always in the same
+organization. Service Provider may wish to work with more than one
+Identity Provider, and likewise a given Identity Provider might wish
+to work with multiple Service Providers. When a group of Identity and
+Service Providers agree to work together, this group is called a
+federation. (from http://shibboleth.net/about/basic.html[How
+Shibboleth Works: Basic Concepts])
+
+- Cookie based SSO authentication with auth tokens
+
+
+Possible choices:
+- http://www.jasig.org/cas[CAS]
+- http://openam.forgerock.org[OpenAM]
+- http://www.picketlink.org[Jboss (Red Hat) PicketLink]
+- http://www.josso.org/[JOSSO]
+- http://shibboleth.net[Shibboleth]
+
+- http://weblogin.org[CoSign] -
+- http://esoeproject.qut.edu.au[Enterprise Sign-On Engine] - ESOE -
+  unmaintained
+
+JEE considerations
+-------------------
+
+Applications should configure web.xml:
+- login-config element
+- security-constraint element
+- security-role element
+
+How about spring security?
+
+
+CAS
+---
+
+- https://wiki.jasig.org/display/CASUM/SPNEGO[CAS SPNEGO Basics]
+- http://lafemmeprogrammeur.blogspot.com/2008/03/tech-stuff-part-one-setting-up-acegi.html[Setting up Acegi, CAS, Kerberos/SPNEGO and Websphere 6.1 Part ONE]
+- http://lafemmeprogrammeur.blogspot.com/2008/05/continued-from-part-one-step-four-setup.html[Setting up Acegi, CAS, Kerberos/SPNEGO and Websphere 6.1 Part TWO]
+
+- http://blog.springsource.org/2009/09/28/spring-security-kerberos/[Spring Security Kerberos/SPNEGO Extension]
+- http://holisticsecurity.wordpress.com/2011/07/29/sso-cas-ified-java-webapp-liferay/[Web-SSO
+  between a CAS-ified Java webapp and Liferay using CAS] (1/2)
+- http://holisticsecurity.wordpress.com/2011/02/19/web-sso-between-liferay-and-alfresco-with-cas-and-penrose-part-22/[Web-SSO
+  between Liferay and Alfresco with CAS and Penrose] (2/2)
+
+
+- https://wiki.jasig.org/display/CAS/Multi-Factor+Authentication[Multi-Factor Authentication]
+- http://vimeo.com/11629932[Multi-factor Authentication with CAS]
+  presentation on Vimeo
+- http://lanyrd.com/2013/apereo/schtxc/[Factoring the Authentication
+  Equation: Integrating Multi-factor Authentication into
+  CAS/Shibboleth] - A session at Open Apereo 2013 Conference (Jasig & Sakai)
+
+OpenAM
+------
+
+- http://openam.forgerock.org/[OpenAM Project] - OpenAM provides open source Authentication, Authorization, Entitlement and Federation software.
+- https://wikis.forgerock.org/confluence/display/openam/Home[OpenAM
+  Wiki] - OpenAM was previously known as OpenSSO.
+
+
+
+Shibboleth
+----------
+
+- http://twiki.org/cgi-bin/view/TWiki/HowToEnableSingleSignOn[How to
+  Enable Single Sign on with TWiki] - Apache web server configuration
+
+- https://wiki.enterpriselab.ch/el/public:sso:opensso_sp_shib20_idp[Pairing
+  OpenSSO and Shibboleth 2.0] - OpenSSO is now known as OpenAM
+
+
+Resources
+---------
+
+- http://www.slideshare.net/craigsdickson/fast-and-free-sso-a-survey-of-open-source-solutions-to-single-sign-on[Fast and Free SSO: A Survey of Open-Source Solutions to Single Sign-on]
+

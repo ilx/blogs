@@ -81,15 +81,19 @@ How about spring security?
 CAS
 ---
 
+- http://www.jasig.org/cas/cas2-architecture[CAS 2 Architecture]
+- https://wiki.jasig.org/display/CAS/Proxy+CAS+Walkthrough[Proxy CAS Walkthrough]
+
+
 - https://wiki.jasig.org/display/CASUM/SPNEGO[CAS SPNEGO Basics]
+
+
 - http://lafemmeprogrammeur.blogspot.com/2008/03/tech-stuff-part-one-setting-up-acegi.html[Setting up Acegi, CAS, Kerberos/SPNEGO and Websphere 6.1 Part ONE]
 - http://lafemmeprogrammeur.blogspot.com/2008/05/continued-from-part-one-step-four-setup.html[Setting up Acegi, CAS, Kerberos/SPNEGO and Websphere 6.1 Part TWO]
 
+
 - http://blog.springsource.org/2009/09/28/spring-security-kerberos/[Spring Security Kerberos/SPNEGO Extension]
-- http://holisticsecurity.wordpress.com/2011/07/29/sso-cas-ified-java-webapp-liferay/[Web-SSO
-  between a CAS-ified Java webapp and Liferay using CAS] (1/2)
-- http://holisticsecurity.wordpress.com/2011/02/19/web-sso-between-liferay-and-alfresco-with-cas-and-penrose-part-22/[Web-SSO
-  between Liferay and Alfresco with CAS and Penrose] (2/2)
+
 
 
 - https://wiki.jasig.org/display/CAS/Multi-Factor+Authentication[Multi-Factor Authentication]
@@ -98,6 +102,30 @@ CAS
 - http://lanyrd.com/2013/apereo/schtxc/[Factoring the Authentication
   Equation: Integrating Multi-factor Authentication into
   CAS/Shibboleth] - A session at Open Apereo 2013 Conference (Jasig & Sakai)
+
+
+LDAP:
+(DEPLOYERCONFIGCONTEXT.XML)
+- http://www.liferay.com/community/wiki/-/wiki/Main/CAS++Authentication+using+multiple+Ldap+Servers[CAS Authentication using multiple Ldap Servers]
+- http://esup-casgeneric.sourceforge.net/auth-ldap.html[LDAP authentication with CAS GH]
+- http://stackoverflow.com/questions/10953965/how-to-setup-cas-with-ldap-on-tomcat-no-error[How
+  to setup CAS with LDAP on tomcat] stackoverflow
+
+WEBSPHERE:
+- http://www.pagalbytes.com/?q=node/280[Configure CAS with IBM Websphere Portal (Step by Step )]
+- https://wiki.jasig.org/pages/viewpage.action?pageId=19314[CASifying IBM WebSphere ( WAS ), Websphere Portal Server ( WPS ) or WebSphere Content Management ( WCM ) using the Trust Association Interceptor API ( TAI )]
+- http://portalplus.wordpress.com/2012/04/10/configure-websphere-portal-with-cas-sso/[Using CAS with WebSphere Portal 6.1 for SSO]
+- http://blog.harezmi.com.tr/delegating-websphere-portal-authentication-to-cas-via-trust-association-interceptor-tai/[Delegating Websphere Portal Authentication to CAS via Trust Association Interceptor (TAI)]
+
+
+LIFERAY/ALFRESCO:
+
+
+- http://holisticsecurity.wordpress.com/2011/07/29/sso-cas-ified-java-webapp-liferay/[Web-SSO
+  between a CAS-ified Java webapp and Liferay using CAS] (1/2)
+- http://holisticsecurity.wordpress.com/2011/02/19/web-sso-between-liferay-and-alfresco-with-cas-and-penrose-part-22/[Web-SSO
+  between Liferay and Alfresco with CAS and Penrose] (2/2)
+
 
 OpenAM
 ------
@@ -121,5 +149,8 @@ Shibboleth
 Resources
 ---------
 
+- http://www.captaindebug.com/2012/11/a-list-of-things-you-can-do-with-spring.html[Ten Things You Can Do With Spring Security]
 - http://www.slideshare.net/craigsdickson/fast-and-free-sso-a-survey-of-open-source-solutions-to-single-sign-on[Fast and Free SSO: A Survey of Open-Source Solutions to Single Sign-on]
+- http://www.techpaste.com/2012/02/steps-turn-global-security-8[Steps to turn on global security on WAS 8]
+- http://www.ibm.com/developerworks/websphere/techjournal/1003_botzum/1003_botzum.html[Q & A: Frequently asked questions about WebSphere Application Server security]
 

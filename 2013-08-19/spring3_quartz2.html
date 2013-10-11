@@ -1,0 +1,680 @@
+<div style="color: #484848; font-family: 'Trebuchet MS', Helvetica, sans-serif">
+<h1>How to use Quartz 2.2 with Spring 3.2.x on WebSphere</h1>
+<p>
+</p>
+<a name="preamble"></a>
+<p>We would like to use Quartz scheduler in a Spring 3.2.x application.
+Target environment is WebSphere Application server 8.0.x, Oracle DB
+11s.</p>
+<p>Let&#8217;s pretend we would like to execute simple Echo service at fixed
+interval.</p>
+<p>Here&#8217;s the service we would like to execute:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">import</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>Job<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>JobExecutionContext<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>JobExecutionException<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>slf4j<font color="#990000">.</font>Logger<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>slf4j<font color="#990000">.</font>LoggerFactory<font color="#990000">;</font>
+
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">EchoService</font> <b><font color="#0000FF">implements</font></b> Job <font color="#FF0000">{</font>
+
+    <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">Logger</font> LOG <font color="#990000">=</font> LoggerFactory<font color="#990000">.</font><b><font color="#000000">getLogger</font></b><font color="#990000">(</font>EchoService<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+
+    @Override
+    <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">execute</font></b><font color="#990000">(</font><font color="#008080">JobExecutionContext</font> jobContext<font color="#990000">)</font> <b><font color="#0000FF">throws</font></b> JobExecutionException <font color="#FF0000">{</font>
+        LOG<font color="#990000">.</font><b><font color="#000000">error</font></b><font color="#990000">(</font><font color="#FF0000">"echo service invoked"</font><font color="#990000">);</font>
+    <font color="#FF0000">}</font>
+
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<p>For now, we will use mix of Spring XML configuration and Java configuration.</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">import</font></b> <b><font color="#0000FF">static</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>CronScheduleBuilder<font color="#990000">.*;</font>
+<b><font color="#000080">import</font></b> <b><font color="#0000FF">static</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>TriggerBuilder<font color="#990000">.*;</font>
+
+<b><font color="#000080">import</font></b> java<font color="#990000">.</font>io<font color="#990000">.</font>IOException<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> java<font color="#990000">.</font>util<font color="#990000">.</font>Properties<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> java<font color="#990000">.</font>util<font color="#990000">.</font>concurrent<font color="#990000">.</font>Executor<font color="#990000">;</font>
+
+<b><font color="#000080">import</font></b> javax<font color="#990000">.</font>annotation<font color="#990000">.</font>PostConstruct<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> javax<font color="#990000">.</font>sql<font color="#990000">.</font>DataSource<font color="#990000">;</font>
+
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>JobDetail<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>Trigger<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>commonj<font color="#990000">.</font>WorkManagerThreadExecutor<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>impl<font color="#990000">.</font>StdSchedulerFactory<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>impl<font color="#990000">.</font>jdbcjobstore<font color="#990000">.</font>oracle<font color="#990000">.</font>OracleDelegate<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>slf4j<font color="#990000">.</font>Logger<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>slf4j<font color="#990000">.</font>LoggerFactory<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>beans<font color="#990000">.</font>BeansException<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>beans<font color="#990000">.</font>factory<font color="#990000">.</font>InitializingBean<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>beans<font color="#990000">.</font>factory<font color="#990000">.</font>config<font color="#990000">.</font>PropertiesFactoryBean<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>ApplicationContext<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>ApplicationContextAware<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>annotation<font color="#990000">.</font>Bean<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>annotation<font color="#990000">.</font>Configuration<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>core<font color="#990000">.</font>io<font color="#990000">.</font>ClassPathResource<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>scheduling<font color="#990000">.</font>quartz<font color="#990000">.</font>JobDetailFactoryBean<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>scheduling<font color="#990000">.</font>quartz<font color="#990000">.</font>LocalDataSourceJobStore<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>scheduling<font color="#990000">.</font>quartz<font color="#990000">.</font>SchedulerFactoryBean<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>transaction<font color="#990000">.</font>PlatformTransactionManager<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>util<font color="#990000">.</font>Assert<font color="#990000">;</font>
+
+@Configuration
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">QuartzSchedulingConfiguration</font> <b><font color="#0000FF">implements</font></b> InitializingBean<font color="#990000">,</font> ApplicationContextAware <font color="#FF0000">{</font>
+    <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> BEAN_QUARTZ_SCHEDULER <font color="#990000">=</font> <font color="#FF0000">"myQuartzScheduler"</font><font color="#990000">;</font>
+    <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> BEAN_ECHO_JOB <font color="#990000">=</font> <font color="#FF0000">"echoJob"</font><font color="#990000">;</font>
+    <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> QUARTZ_SCHEDULER_NAME <font color="#990000">=</font> <font color="#FF0000">"my-quartz-scheduler"</font><font color="#990000">;</font>
+    <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> QUARTZ_DEFAULT_JOB_GROUP <font color="#990000">=</font> <font color="#FF0000">"my-quartz-default-group"</font><font color="#990000">;</font>
+
+    <b><font color="#0000FF">private</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">Logger</font> LOG <font color="#990000">=</font> LoggerFactory<font color="#990000">.</font><b><font color="#000000">getLogger</font></b><font color="#990000">(</font>QuartzSchedulingConfiguration<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+    <i><font color="#9A1900">// for cron syntax see http://quartz-scheduler.org/documentation/quartz-2.2.x/tutorials/tutorial-lesson-06</font></i>
+    <i><font color="#9A1900">// to ease creation of cron expressions use use http://www.cronmaker.com/</font></i>
+    <b><font color="#0000FF">private</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> QUARTZ_CRON_EVERY_10_SECONDS <font color="#990000">=</font> <font color="#FF0000">"0/10 * * * * ?"</font><font color="#990000">;</font>
+    <b><font color="#0000FF">private</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> QUARTZ_CRON_EVERY_5_MINUTES <font color="#990000">=</font> <font color="#FF0000">"0 0/5 * * * ?"</font><font color="#990000">;</font>
+    <b><font color="#0000FF">private</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> QUARTZ_CRON_EVERY_DAY_AT_6_AM <font color="#990000">=</font> <font color="#FF0000">"0 0 6 1/1 * ? *"</font><font color="#990000">;</font>
+
+    <b><font color="#0000FF">private</font></b> <font color="#008080">DataSource</font> quartzDataSource<font color="#990000">;</font>
+    <b><font color="#0000FF">private</font></b> <font color="#008080">PlatformTransactionManager</font> quartzTransactionManager<font color="#990000">;</font>
+    <b><font color="#0000FF">private</font></b> <font color="#008080">Executor</font> quartzTaskExecutor<font color="#990000">;</font>
+    <b><font color="#0000FF">private</font></b> <font color="#008080">ApplicationContext</font> applicationContext<font color="#990000">;</font>
+
+    @PostConstruct
+    <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">init</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+        LOG<font color="#990000">.</font><b><font color="#000000">info</font></b><font color="#990000">(</font><font color="#FF0000">"QuartzSchedulingConfiguration initialized."</font><font color="#990000">);</font>
+    <font color="#FF0000">}</font>
+
+    @<b><font color="#000000">Bean</font></b><font color="#990000">(</font>name<font color="#990000">=</font>BEAN_QUARTZ_SCHEDULER<font color="#990000">)</font>
+    <b><font color="#0000FF">public</font></b> <font color="#008080">SchedulerFactoryBean</font> <b><font color="#000000">myQuartzScheduler</font></b><font color="#990000">()</font> <font color="#FF0000">{</font> <i><font color="#9A1900">// <b>&lt;1&gt;</b></font></i>
+        <font color="#008080">SchedulerFactoryBean</font> quartzScheduler <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">SchedulerFactoryBean</font></b><font color="#990000">();</font>
+
+        quartzScheduler<font color="#990000">.</font><b><font color="#000000">setDataSource</font></b><font color="#990000">(</font>quartzDataSource<font color="#990000">);</font>
+        quartzScheduler<font color="#990000">.</font><b><font color="#000000">setTransactionManager</font></b><font color="#990000">(</font>quartzTransactionManager<font color="#990000">);</font>
+        quartzScheduler<font color="#990000">.</font><b><font color="#000000">setOverwriteExistingJobs</font></b><font color="#990000">(</font><b><font color="#0000FF">true</font></b><font color="#990000">);</font>
+        quartzScheduler<font color="#990000">.</font><b><font color="#000000">setAutoStartup</font></b><font color="#990000">(</font><b><font color="#0000FF">true</font></b><font color="#990000">);</font>
+        quartzScheduler<font color="#990000">.</font><b><font color="#000000">setSchedulerName</font></b><font color="#990000">(</font>QUARTZ_SCHEDULER_NAME<font color="#990000">);</font>
+
+        quartzScheduler<font color="#990000">.</font><b><font color="#000000">setTaskExecutor</font></b><font color="#990000">(</font>quartzTaskExecutor<font color="#990000">);</font> <i><font color="#9A1900">// <b>&lt;5&gt;</b></font></i>
+
+        <i><font color="#9A1900">// custom job factory of spring with DI support for</font></i>
+        <i><font color="#9A1900">// @Autowired!</font></i>
+        <i><font color="#9A1900">// <b>&lt;2&gt;</b></font></i>
+        <font color="#008080">AutowiringSpringBeanJobFactory</font> jobFactory <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">AutowiringSpringBeanJobFactory</font></b><font color="#990000">();</font>
+        jobFactory<font color="#990000">.</font><b><font color="#000000">setApplicationContext</font></b><font color="#990000">(</font>applicationContext<font color="#990000">);</font>
+        quartzScheduler<font color="#990000">.</font><b><font color="#000000">setJobFactory</font></b><font color="#990000">(</font>jobFactory<font color="#990000">);</font>
+
+        quartzScheduler<font color="#990000">.</font><b><font color="#000000">setQuartzProperties</font></b><font color="#990000">(</font><b><font color="#000000">quartzProperties</font></b><font color="#990000">());</font>
+
+        JobDetail<font color="#990000">[]</font> jobDetails <font color="#990000">=</font> <font color="#FF0000">{</font><b><font color="#000000">statisticCalculationJob</font></b><font color="#990000">().</font><b><font color="#000000">getObject</font></b><font color="#990000">()</font><font color="#FF0000">}</font><font color="#990000">;</font>
+        quartzScheduler<font color="#990000">.</font><b><font color="#000000">setJobDetails</font></b><font color="#990000">(</font>jobDetails<font color="#990000">);</font>
+
+        Trigger<font color="#990000">[]</font> triggers <font color="#990000">=</font> <font color="#FF0000">{</font> <b><font color="#000000">statisticCalculationTrigger</font></b><font color="#990000">()</font> <font color="#FF0000">}</font><font color="#990000">;</font>
+        quartzScheduler<font color="#990000">.</font><b><font color="#000000">setTriggers</font></b><font color="#990000">(</font>triggers<font color="#990000">);</font>
+
+        <i><font color="#9A1900">// TODO: add quartz job listeners that will log when jobs have started and when they've ended...</font></i>
+
+        <b><font color="#0000FF">return</font></b> quartzScheduler<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    @<b><font color="#000000">Bean</font></b><font color="#990000">(</font>name<font color="#990000">=</font>BEAN_ECHO_JOB<font color="#990000">)</font>
+    <b><font color="#0000FF">public</font></b> <font color="#008080">JobDetailFactoryBean</font> <b><font color="#000000">statisticCalculationJob</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+        <font color="#008080">JobDetailFactoryBean</font> jobDetailFactory <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">JobDetailFactoryBean</font></b><font color="#990000">();</font>
+        jobDetailFactory<font color="#990000">.</font><b><font color="#000000">setJobClass</font></b><font color="#990000">(</font>EchoJob<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+        jobDetailFactory<font color="#990000">.</font><b><font color="#000000">setGroup</font></b><font color="#990000">(</font>QUARTZ_DEFAULT_JOB_GROUP<font color="#990000">);</font>
+        jobDetailFactory<font color="#990000">.</font><b><font color="#000000">setDescription</font></b><font color="#990000">(</font><font color="#FF0000">"Invoke Echo service..."</font><font color="#990000">);</font>
+        jobDetailFactory<font color="#990000">.</font><b><font color="#000000">setDurability</font></b><font color="#990000">(</font><b><font color="#0000FF">true</font></b><font color="#990000">);</font>
+
+        <b><font color="#0000FF">return</font></b> jobDetailFactory<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    @Bean
+    <b><font color="#0000FF">public</font></b> <font color="#008080">Trigger</font> <b><font color="#000000">statisticCalculationTrigger</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+        <i><font color="#9A1900">// TODO: should we use PersistableCronTriggerFactoryBean?</font></i>
+        <i><font color="#9A1900">// @formatter:off</font></i>
+        <font color="#008080">Trigger</font> trigger <font color="#990000">=</font> <b><font color="#000000">newTrigger</font></b><font color="#990000">()</font>
+                <font color="#990000">.</font><b><font color="#000000">withIdentity</font></b><font color="#990000">(</font><font color="#FF0000">"echo-service-trigger"</font><font color="#990000">,</font> QUARTZ_DEFAULT_JOB_GROUP<font color="#990000">)</font>
+                <font color="#990000">.</font><b><font color="#000000">withSchedule</font></b><font color="#990000">(</font>
+                        <b><font color="#000000">cronSchedule</font></b><font color="#990000">(</font>QUARTZ_CRON_EVERY_5_MINUTES<font color="#990000">)</font>
+                            <font color="#990000">.</font><b><font color="#000000">withMisfireHandlingInstructionFireAndProceed</font></b><font color="#990000">()</font>
+                        <font color="#990000">)</font>
+                <font color="#990000">.</font><b><font color="#000000">forJob</font></b><font color="#990000">(</font><b><font color="#000000">statisticCalculationJob</font></b><font color="#990000">().</font><b><font color="#000000">getObject</font></b><font color="#990000">())</font>
+                <font color="#990000">.</font><b><font color="#000000">build</font></b><font color="#990000">();</font>
+        <i><font color="#9A1900">// @formatter:on</font></i>
+
+        <b><font color="#0000FF">return</font></b> trigger<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    @Bean
+    <b><font color="#0000FF">public</font></b> <font color="#008080">Properties</font> <b><font color="#000000">quartzProperties</font></b><font color="#990000">()</font> <font color="#FF0000">{</font>
+        <i><font color="#9A1900">// TODO: fix overcomplicated loading of quartz configuration</font></i>
+        <i><font color="#9A1900">// properties</font></i>
+        <font color="#008080">PropertiesFactoryBean</font> propertiesFactoryBean <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">PropertiesFactoryBean</font></b><font color="#990000">();</font>
+        propertiesFactoryBean<font color="#990000">.</font><b><font color="#000000">setLocation</font></b><font color="#990000">(</font><b><font color="#0000FF">new</font></b> <b><font color="#000000">ClassPathResource</font></b><font color="#990000">(</font><font color="#FF0000">"/quartz.properties"</font><font color="#990000">));</font>
+        <font color="#008080">Properties</font> properties <font color="#990000">=</font> <b><font color="#0000FF">null</font></b><font color="#990000">;</font>
+        <b><font color="#0000FF">try</font></b> <font color="#FF0000">{</font>
+            propertiesFactoryBean<font color="#990000">.</font><b><font color="#000000">afterPropertiesSet</font></b><font color="#990000">();</font>
+            properties <font color="#990000">=</font> propertiesFactoryBean<font color="#990000">.</font><b><font color="#000000">getObject</font></b><font color="#990000">();</font>
+        <font color="#FF0000">}</font> <b><font color="#0000FF">catch</font></b> <font color="#990000">(</font><font color="#008080">IOException</font> e<font color="#990000">)</font> <font color="#FF0000">{</font>
+            LOG<font color="#990000">.</font><b><font color="#000000">warn</font></b><font color="#990000">(</font><font color="#FF0000">"Cannot load quartz.properties."</font><font color="#990000">);</font>
+        <font color="#FF0000">}</font>
+        <b><font color="#0000FF">if</font></b> <font color="#990000">(</font><b><font color="#0000FF">null</font></b> <font color="#990000">==</font> properties<font color="#990000">)</font> <font color="#FF0000">{</font>
+            properties <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">Properties</font></b><font color="#990000">();</font>
+        <font color="#FF0000">}</font>
+
+        <i><font color="#9A1900">// override loaded properties</font></i>
+        <b><font color="#000000">configureConcurrency</font></b><font color="#990000">(</font>properties<font color="#990000">);</font> <i><font color="#9A1900">// <b>&lt;3&gt;</b></font></i>
+        <b><font color="#000000">configureJobStore</font></b><font color="#990000">(</font>properties<font color="#990000">);</font>
+        <b><font color="#000000">configureClustering</font></b><font color="#990000">(</font>properties<font color="#990000">);</font>
+
+
+        <b><font color="#0000FF">return</font></b> properties<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    <b><font color="#0000FF">private</font></b> <font color="#009900">void</font> <b><font color="#000000">configureConcurrency</font></b><font color="#990000">(</font><font color="#008080">Properties</font> properties<font color="#990000">)</font> <font color="#FF0000">{</font>
+        <i><font color="#9A1900">// see http://jira.terracotta.org/jira/browse/QTZ-113</font></i>
+        <i><font color="#9A1900">// see http://jira.terracotta.org/jira/browse/QTZ-194</font></i>
+        <i><font color="#9A1900">// see http://stackoverflow.com/questions/175880/unmanaged-threads-spring-quartz-websphere-hibernate</font></i>
+        properties<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>StdSchedulerFactory<font color="#990000">.</font>PROP_THREAD_EXECUTOR_CLASS<font color="#990000">,</font> WorkManagerThreadExecutor<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">.</font><b><font color="#000000">getCanonicalName</font></b><font color="#990000">());</font> <i><font color="#9A1900">// <b>&lt;4&gt;</b></font></i>
+        properties<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>StdSchedulerFactory<font color="#990000">.</font>PROP_THREAD_EXECUTOR <font color="#990000">+</font> <font color="#FF0000">".workManagerName"</font><font color="#990000">,</font> <font color="#FF0000">"java:comp/env/MyQuartz_WM"</font><font color="#990000">);</font>
+    <font color="#FF0000">}</font>
+
+    <b><font color="#0000FF">private</font></b> <font color="#009900">void</font> <b><font color="#000000">configureJobStore</font></b><font color="#990000">(</font><font color="#008080">Properties</font> properties<font color="#990000">)</font> <font color="#FF0000">{</font>
+        properties<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>StdSchedulerFactory<font color="#990000">.</font>PROP_JOB_STORE_USE_PROP<font color="#990000">,</font> Boolean<font color="#990000">.</font>TRUE<font color="#990000">);</font> <i><font color="#9A1900">// <b>&lt;9&gt;</b></font></i>
+        properties<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>StdSchedulerFactory<font color="#990000">.</font>PROP_JOB_STORE_CLASS <font color="#990000">,</font> LocalDataSourceJobStore<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">.</font><b><font color="#000000">getCanonicalName</font></b><font color="#990000">());</font>
+        properties<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>StdSchedulerFactory<font color="#990000">.</font>PROP_JOB_STORE_PREFIX <font color="#990000">+</font> <font color="#FF0000">".tablePrefix"</font><font color="#990000">,</font> <font color="#FF0000">"MYSCHEMA.QRTZ_"</font><font color="#990000">);</font> <i><font color="#9A1900">// <b>&lt;7&gt;</b></font></i>
+        properties<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>StdSchedulerFactory<font color="#990000">.</font>PROP_JOB_STORE_PREFIX <font color="#990000">+</font> <font color="#FF0000">".isClustered"</font><font color="#990000">,</font> Boolean<font color="#990000">.</font>TRUE<font color="#990000">);</font> <i><font color="#9A1900">// <b>&lt;8&gt;</b></font></i>
+        properties<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>StdSchedulerFactory<font color="#990000">.</font>PROP_JOB_STORE_PREFIX <font color="#990000">+</font> <font color="#FF0000">".driverDelegateClass"</font><font color="#990000">,</font> OracleDelegate<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">.</font><b><font color="#000000">getCanonicalName</font></b><font color="#990000">());</font>
+    <font color="#FF0000">}</font>
+
+    <b><font color="#0000FF">private</font></b> <font color="#009900">void</font> <b><font color="#000000">configureClustering</font></b><font color="#990000">(</font><font color="#008080">Properties</font> properties<font color="#990000">)</font> <font color="#FF0000">{</font>
+        <i><font color="#9A1900">/*</font></i>
+<i><font color="#9A1900">         * IMPORTANT: Never run clustering on separate machines,</font></i>
+<i><font color="#9A1900">         * unless their clocks are synchronized using some form</font></i>
+<i><font color="#9A1900">         * of time-sync service (daemon) that runs very regularly</font></i>
+<i><font color="#9A1900">         * (the clocks must be within a second of each other).</font></i>
+<i><font color="#9A1900">         *</font></i>
+<i><font color="#9A1900">         * See </font></i><u><font color="#0000FF">http://www.boulder.nist.gov/timefreq/service/its.htm</font></u>
+<i><font color="#9A1900">         * if you are unfamiliar with how to do this.</font></i>
+<i><font color="#9A1900">         *</font></i>
+<i><font color="#9A1900">         * Never start (scheduler.start()) a non-clustered instance</font></i>
+<i><font color="#9A1900">         * against the same set of database tables that any other</font></i>
+<i><font color="#9A1900">         * instance is running (start()ed) against.</font></i>
+<i><font color="#9A1900">         *</font></i>
+<i><font color="#9A1900">         * You may get serious data corruption, and will definitely</font></i>
+<i><font color="#9A1900">         * experience erratic behavior.</font></i>
+<i><font color="#9A1900">         */</font></i>
+        properties<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>StdSchedulerFactory<font color="#990000">.</font>PROP_SCHED_INSTANCE_ID<font color="#990000">,</font> <font color="#FF0000">"AUTO"</font><font color="#990000">);</font>
+        properties<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>StdSchedulerFactory<font color="#990000">.</font>PROP_SCHED_INSTANCE_NAME<font color="#990000">,</font> QUARTZ_SCHEDULER_NAME<font color="#990000">);</font>
+
+        properties<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font><font color="#FF0000">"org.quartz.jobStore.misfireThreshold"</font><font color="#990000">,</font> <font color="#FF0000">"60000"</font><font color="#990000">);</font>
+        properties<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font><font color="#FF0000">"org.quartz.jobStore.clusterCheckinInterval"</font><font color="#990000">,</font> <font color="#FF0000">"20000"</font><font color="#990000">);</font>
+
+        properties<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>StdSchedulerFactory<font color="#990000">.</font>PROP_SCHED_RMI_EXPORT<font color="#990000">,</font> Boolean<font color="#990000">.</font>FALSE<font color="#990000">);</font>
+        properties<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>StdSchedulerFactory<font color="#990000">.</font>PROP_SCHED_RMI_PROXY<font color="#990000">,</font> Boolean<font color="#990000">.</font>FALSE<font color="#990000">);</font>
+    <font color="#FF0000">}</font>
+
+    <i><font color="#9A1900">// <b>&lt;6&gt;</b></font></i>
+    <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">setQuartzDataSource</font></b><font color="#990000">(</font><b><font color="#0000FF">final</font></b> <font color="#008080">DataSource</font> quartzDataSource<font color="#990000">)</font> <font color="#FF0000">{</font>
+        <b><font color="#0000FF">this</font></b><font color="#990000">.</font>quartzDataSource <font color="#990000">=</font> quartzDataSource<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">setQuartzTransactionManager</font></b><font color="#990000">(</font><b><font color="#0000FF">final</font></b> <font color="#008080">PlatformTransactionManager</font> quartzTransactionManager<font color="#990000">)</font> <font color="#FF0000">{</font>
+        <b><font color="#0000FF">this</font></b><font color="#990000">.</font>quartzTransactionManager <font color="#990000">=</font> quartzTransactionManager<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">setQuartzTaskExecutor</font></b><font color="#990000">(</font><b><font color="#0000FF">final</font></b> <font color="#008080">Executor</font> quartzTaskExecutor<font color="#990000">)</font> <font color="#FF0000">{</font>
+        <b><font color="#0000FF">this</font></b><font color="#990000">.</font>quartzTaskExecutor <font color="#990000">=</font> quartzTaskExecutor<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    @Override
+    <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">afterPropertiesSet</font></b><font color="#990000">()</font> <b><font color="#0000FF">throws</font></b> Exception <font color="#FF0000">{</font>
+        Assert<font color="#990000">.</font><b><font color="#000000">notNull</font></b><font color="#990000">(</font><b><font color="#0000FF">this</font></b><font color="#990000">.</font>quartzDataSource<font color="#990000">,</font> <font color="#FF0000">"Quartz data source must be set"</font><font color="#990000">);</font>
+        Assert<font color="#990000">.</font><b><font color="#000000">notNull</font></b><font color="#990000">(</font><b><font color="#0000FF">this</font></b><font color="#990000">.</font>quartzTransactionManager<font color="#990000">,</font> <font color="#FF0000">"Quartz transaction manager must be set"</font><font color="#990000">);</font>
+        Assert<font color="#990000">.</font><b><font color="#000000">notNull</font></b><font color="#990000">(</font><b><font color="#0000FF">this</font></b><font color="#990000">.</font>quartzTaskExecutor<font color="#990000">,</font> <font color="#FF0000">"Quartz task executor must be set"</font><font color="#990000">);</font>
+    <font color="#FF0000">}</font>
+
+    @Override
+    <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">setApplicationContext</font></b><font color="#990000">(</font><font color="#008080">ApplicationContext</font> applicationContext<font color="#990000">)</font> <b><font color="#0000FF">throws</font></b> BeansException <font color="#FF0000">{</font>
+        <b><font color="#0000FF">this</font></b><font color="#990000">.</font>applicationContext <font color="#990000">=</font> applicationContext<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<ol>
+<li>
+<p>
+myQuartzScheduler is spring provided bean factory where all
+    configuration magic happens
+</p>
+</li>
+<li>
+<p>
+when jobs get created they&#8217;re not spring aware by default. We want
+    to use spring DI - this will give us a way to autowire spring
+    managed deps into our jobs. This AutowiringSpringBeanJobFactory is
+    missing link that will give more power to our jobs.
+</p>
+</li>
+<li>
+<p>
+we could configure quartz using quartz.properties, but I wanted to
+    configure concurrency in the configuration class. If you would
+    like to use quartz.properties file based configuration remember to
+    comment following lines since they will override properties from
+    quartz.properties.
+</p>
+</li>
+<li>
+<p>
+when running in WAS or WebLogic it&#8217;s probably good idea to use
+    application server managed threads - by default Quartz doesn&#8217;t use
+    managed threads for all of the threads. Here we configure it to
+    use managed threads for MisfireHandler and ClusterManager
+</p>
+</li>
+<li>
+<p>
+as in comment under &lt;4&gt; - we need to tell Quartz scheduler to
+    execute jobs as application managed threads - here we&#8217;re telling
+    it to use spring provided thread executor
+</p>
+</li>
+<li>
+<p>
+in order to configure quartz we need to provide: datasource,
+    transaction manager and task executor
+</p>
+</li>
+<li>
+<p>
+notice non-default prefix for quartz tables!
+</p>
+</li>
+<li>
+<p>
+make sure we use cluster aware scheduler!
+</p>
+</li>
+<li>
+<p>
+this may cause some problems, see
+    <a href="http://www.objectpartners.com/2013/07/09/configuring-quartz-2-with-spring-in-clustered-mode/">Configuring
+    Quartz 2 with Spring in clustered mode</a> for more info (PersistableCronTriggerFactoryBean)
+</p>
+</li>
+</ol>
+<p>Here&#8217;s the AutowiringSpringBeanJobFactory which will allow us to use
+@Autowired and link our jobs to spring DI context:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">import</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>spi<font color="#990000">.</font>TriggerFiredBundle<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>beans<font color="#990000">.</font>factory<font color="#990000">.</font>config<font color="#990000">.</font>AutowireCapableBeanFactory<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>ApplicationContext<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>context<font color="#990000">.</font>ApplicationContextAware<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>springframework<font color="#990000">.</font>scheduling<font color="#990000">.</font>quartz<font color="#990000">.</font>SpringBeanJobFactory<font color="#990000">;</font>
+
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">final</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">AutowiringSpringBeanJobFactory</font> <b><font color="#0000FF">extends</font></b> SpringBeanJobFactory <font color="#008080">implements</font> ApplicationContextAware <font color="#FF0000">{</font>
+
+    <b><font color="#0000FF">private</font></b> <b><font color="#0000FF">transient</font></b> <font color="#008080">AutowireCapableBeanFactory</font> beanFactory<font color="#990000">;</font>
+
+    @Override
+    <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">setApplicationContext</font></b><font color="#990000">(</font><b><font color="#0000FF">final</font></b> <font color="#008080">ApplicationContext</font> context<font color="#990000">)</font> <font color="#FF0000">{</font>
+        beanFactory <font color="#990000">=</font> context<font color="#990000">.</font><b><font color="#000000">getAutowireCapableBeanFactory</font></b><font color="#990000">();</font>
+    <font color="#FF0000">}</font>
+
+    @Override
+    <b><font color="#0000FF">protected</font></b> <font color="#008080">Object</font> <b><font color="#000000">createJobInstance</font></b><font color="#990000">(</font><b><font color="#0000FF">final</font></b> <font color="#008080">TriggerFiredBundle</font> bundle<font color="#990000">)</font> <b><font color="#0000FF">throws</font></b> Exception <font color="#FF0000">{</font>
+        <b><font color="#0000FF">final</font></b> <font color="#008080">Object</font> job <font color="#990000">=</font> <b><font color="#0000FF">super</font></b><font color="#990000">.</font><b><font color="#000000">createJobInstance</font></b><font color="#990000">(</font>bundle<font color="#990000">);</font>
+        beanFactory<font color="#990000">.</font><b><font color="#000000">autowireBean</font></b><font color="#990000">(</font>job<font color="#990000">);</font>
+        <b><font color="#0000FF">return</font></b> job<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<p>Now, let&#8217;s wire Quartz configuration into our existing Spring XML
+defined context definition:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">&lt;?xml</font></b> <font color="#009900">version</font><font color="#990000">=</font><font color="#FF0000">"1.0"</font> <font color="#009900">encoding</font><font color="#990000">=</font><font color="#FF0000">"UTF-8"</font><b><font color="#000080">?&gt;</font></b>
+<b><font color="#0000FF">&lt;beans</font></b> <font color="#009900">xmlns</font><font color="#990000">=</font><font color="#FF0000">"http://www.springframework.org/schema/beans"</font> <font color="#009900">xmlns:xsi</font><font color="#990000">=</font><font color="#FF0000">"http://www.w3.org/2001/XMLSchema-instance"</font>
+        <font color="#009900">xmlns:task</font><font color="#990000">=</font><font color="#FF0000">"http://www.springframework.org/schema/task"</font> <font color="#009900">xmlns:context</font><font color="#990000">=</font><font color="#FF0000">"http://www.springframework.org/schema/context"</font>
+        <font color="#009900">xmlns:jee</font><font color="#990000">=</font><font color="#FF0000">"http://www.springframework.org/schema/jee"</font>
+        <font color="#009900">xsi:schemaLocation</font><font color="#990000">=</font><font color="#FF0000">"http://www.springframework.org/schema/jee http://www.springframework.org/schema/jee/spring-jee-3.2.xsd</font>
+<font color="#FF0000">                http://www.springframework.org/schema/task http://www.springframework.org/schema/task/spring-task-3.2.xsd</font>
+<font color="#FF0000">                http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.2.xsd</font>
+<font color="#FF0000">                http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.2.xsd"</font><b><font color="#0000FF">&gt;</font></b>
+
+        <b><font color="#0000FF">&lt;jee:jndi-lookup</font></b> <font color="#009900">id</font><font color="#990000">=</font><font color="#FF0000">"MyQuartz_WM"</font> <font color="#009900">jndi-name</font><font color="#990000">=</font><font color="#FF0000">"MyQuartz_WM"</font> <font color="#009900">resource-ref</font><font color="#990000">=</font><font color="#FF0000">"true"</font> <b><font color="#0000FF">/&gt;</font></b>
+
+        <i><font color="#9A1900">&lt;!-- Tasks --&gt;</font></i>
+        <b><font color="#0000FF">&lt;bean</font></b> <font color="#009900">id</font><font color="#990000">=</font><font color="#FF0000">"myTaskExecutor"</font> <font color="#009900">class</font><font color="#990000">=</font><font color="#FF0000">"org.springframework.scheduling.commonj.WorkManagerTaskExecutor"</font><b><font color="#0000FF">&gt;</font></b>
+                <b><font color="#0000FF">&lt;property</font></b> <font color="#009900">name</font><font color="#990000">=</font><font color="#FF0000">"workManager"</font> <font color="#009900">ref</font><font color="#990000">=</font><font color="#FF0000">"MyQuartz_WM"</font> <b><font color="#0000FF">/&gt;</font></b>
+        <b><font color="#0000FF">&lt;/bean&gt;</font></b>
+
+        <b><font color="#0000FF">&lt;bean</font></b> <font color="#009900">id</font><font color="#990000">=</font><font color="#FF0000">"quartzSchedulingConfiguration"</font> <font color="#009900">class</font><font color="#990000">=</font><font color="#FF0000">"QuartzSchedulingConfiguration"</font><b><font color="#0000FF">&gt;</font></b>
+                <b><font color="#0000FF">&lt;property</font></b> <font color="#009900">name</font><font color="#990000">=</font><font color="#FF0000">"quartzTaskExecutor"</font> <font color="#009900">ref</font><font color="#990000">=</font><font color="#FF0000">"myTaskExecutor"</font> <b><font color="#0000FF">/&gt;</font></b>
+                <b><font color="#0000FF">&lt;property</font></b> <font color="#009900">name</font><font color="#990000">=</font><font color="#FF0000">"quartzDataSource"</font> <font color="#009900">ref</font><font color="#990000">=</font><font color="#FF0000">"myAppDS"</font> <b><font color="#0000FF">/&gt;</font></b> <i><font color="#9A1900">&lt;!-- <b>&lt;1&gt;</b> --&gt;</font></i>
+                <b><font color="#0000FF">&lt;property</font></b> <font color="#009900">name</font><font color="#990000">=</font><font color="#FF0000">"quartzTransactionManager"</font> <font color="#009900">ref</font><font color="#990000">=</font><font color="#FF0000">"myTransactionManager"</font> <b><font color="#0000FF">/&gt;</font></b>
+        <b><font color="#0000FF">&lt;/bean&gt;</font></b>
+
+        <i><font color="#9A1900">&lt;!--... --&gt;</font></i>
+
+<b><font color="#0000FF">&lt;/beans&gt;</font></b></tt></pre></td></tr></table>
+<ol>
+<li>
+<p>
+datasource and transaction manager are defined as in typical spring application
+</p>
+</li>
+</ol>
+<p>Of course you would have to define work managers in the application
+server and configure web.xml:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">&lt;?xml</font></b> <font color="#009900">version</font><font color="#990000">=</font><font color="#FF0000">"1.0"</font> <font color="#009900">encoding</font><font color="#990000">=</font><font color="#FF0000">"UTF-8"</font><b><font color="#000080">?&gt;</font></b>
+<b><font color="#0000FF">&lt;web-app</font></b> <font color="#009900">xmlns</font><font color="#990000">=</font><font color="#FF0000">"http://java.sun.com/xml/ns/javaee"</font> <font color="#009900">xmlns:xsi</font><font color="#990000">=</font><font color="#FF0000">"http://www.w3.org/2001/XMLSchema-instance"</font> <font color="#009900">xsi:schemaLocation</font><font color="#990000">=</font><font color="#FF0000">"http://java.sun.com/xml/ns/javaee http://java.sun.com/xml/ns/javaee/web-app_3_0.xsd"</font> <font color="#009900">version</font><font color="#990000">=</font><font color="#FF0000">"3.0"</font> <font color="#009900">metadata-complete</font><font color="#990000">=</font><font color="#FF0000">"true"</font><b><font color="#0000FF">&gt;</font></b>
+  <i><font color="#9A1900">&lt;!--.... ---&gt;</font></i>
+
+  <b><font color="#0000FF">&lt;resource-ref&gt;</font></b>
+    <b><font color="#0000FF">&lt;res-ref-name&gt;</font></b>myAdminDS<b><font color="#0000FF">&lt;/res-ref-name&gt;</font></b>
+    <b><font color="#0000FF">&lt;res-type&gt;</font></b>javax.sql.DataSource<b><font color="#0000FF">&lt;/res-type&gt;</font></b>
+    <b><font color="#0000FF">&lt;res-auth&gt;</font></b>Container<b><font color="#0000FF">&lt;/res-auth&gt;</font></b>
+    <b><font color="#0000FF">&lt;res-sharing-scope&gt;</font></b>Shareable<b><font color="#0000FF">&lt;/res-sharing-scope&gt;</font></b>
+  <b><font color="#0000FF">&lt;/resource-ref&gt;</font></b>
+
+
+  <b><font color="#0000FF">&lt;resource-ref&gt;</font></b>
+    <b><font color="#0000FF">&lt;description&gt;</font></b>Quartz default work manager<b><font color="#0000FF">&lt;/description&gt;</font></b>
+    <b><font color="#0000FF">&lt;res-ref-name&gt;</font></b>myQuartz_WM<b><font color="#0000FF">&lt;/res-ref-name&gt;</font></b>
+    <b><font color="#0000FF">&lt;res-type&gt;</font></b>commonj.work.WorkManager<b><font color="#0000FF">&lt;/res-type&gt;</font></b>
+    <b><font color="#0000FF">&lt;res-auth&gt;</font></b>Container<b><font color="#0000FF">&lt;/res-auth&gt;</font></b>
+    <b><font color="#0000FF">&lt;res-sharing-scope&gt;</font></b>Shareable<b><font color="#0000FF">&lt;/res-sharing-scope&gt;</font></b>
+  <b><font color="#0000FF">&lt;/resource-ref&gt;</font></b>
+
+  <i><font color="#9A1900">&lt;!-- ... --&gt;</font></i>
+
+<b><font color="#0000FF">&lt;/web-app&gt;</font></b></tt></pre></td></tr></table>
+<p>Do not forget ibm-web-bnd.xml:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">&lt;?xml</font></b> <font color="#009900">version</font><font color="#990000">=</font><font color="#FF0000">"1.0"</font> <font color="#009900">encoding</font><font color="#990000">=</font><font color="#FF0000">"UTF-8"</font><b><font color="#000080">?&gt;</font></b>
+<b><font color="#0000FF">&lt;web-bnd</font></b>
+        <font color="#009900">xmlns</font><font color="#990000">=</font><font color="#FF0000">"http://websphere.ibm.com/xml/ns/javaee"</font>
+        <font color="#009900">xmlns:xsi</font><font color="#990000">=</font><font color="#FF0000">"http://www.w3.org/2001/XMLSchema-instance"</font>
+        <font color="#009900">xsi:schemaLocation</font><font color="#990000">=</font><font color="#FF0000">"http://websphere.ibm.com/xml/ns/javaee http://websphere.ibm.com/xml/ns/javaee/ibm-web-bnd_1_1.xsd"</font>
+        <font color="#009900">version</font><font color="#990000">=</font><font color="#FF0000">"1.1"</font><b><font color="#0000FF">&gt;</font></b>
+
+        <b><font color="#0000FF">&lt;virtual-host</font></b> <font color="#009900">name</font><font color="#990000">=</font><font color="#FF0000">"default_host"</font> <b><font color="#0000FF">/&gt;</font></b>
+
+        <b><font color="#0000FF">&lt;resource-ref</font></b> <font color="#009900">name</font><font color="#990000">=</font><font color="#FF0000">"myAdminDS"</font> <font color="#009900">binding-name</font><font color="#990000">=</font><font color="#FF0000">"jdbc/myAdminDS"</font> <b><font color="#0000FF">/&gt;</font></b>
+
+        <b><font color="#0000FF">&lt;resource-ref</font></b> <font color="#009900">name</font><font color="#990000">=</font><font color="#FF0000">"myQuartz_WM"</font> <font color="#009900">binding-name</font><font color="#990000">=</font><font color="#FF0000">"wm/myQuartz_WM"</font> <b><font color="#0000FF">/&gt;</font></b>
+
+        <i><font color="#9A1900">&lt;!-- ... etc.... --&gt;</font></i>
+<b><font color="#0000FF">&lt;/web-bnd&gt;</font></b></tt></pre></td></tr></table>
+<hr>
+<h2><a name="_schedule_an_existing_job_from_spring_controller"></a>Schedule an existing job from Spring controller</h2>
+<p>You may want to execute existing jobs from a web UI. Here&#8217;s how to do
+it from spring controller:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt>@Controller
+@<b><font color="#000000">RequestMapping</font></b><font color="#990000">(</font><font color="#FF0000">"/jobs"</font><font color="#990000">)</font>
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">MyController</font> <font color="#FF0000">{</font>
+
+    @<b><font color="#000000">Autowired</font></b><font color="#990000">(</font>required<font color="#990000">=</font><b><font color="#0000FF">true</font></b><font color="#990000">)</font>
+    @<b><font color="#000000">Qualifier</font></b><font color="#990000">(</font>QuartzSchedulingConfiguration<font color="#990000">.</font>BEAN_QUARTZ_SCHEDULER<font color="#990000">)</font>
+    <b><font color="#0000FF">private</font></b> <font color="#008080">SchedulerFactoryBean</font> schedulerFactory<font color="#990000">;</font>
+
+    @<b><font color="#000000">Autowired</font></b><font color="#990000">(</font>required<font color="#990000">=</font><b><font color="#0000FF">true</font></b><font color="#990000">)</font>
+    @<b><font color="#000000">Qualifier</font></b><font color="#990000">(</font>QuartzSchedulingConfiguration<font color="#990000">.</font>BEAN_ECHO_JOB<font color="#990000">)</font>
+    <b><font color="#0000FF">private</font></b> <font color="#008080">JobDetail</font> echoJob<font color="#990000">;</font>
+
+    @<b><font color="#000000">RequestMapping</font></b><font color="#990000">(</font><font color="#FF0000">"/run/{param}"</font><font color="#990000">)</font>
+    <b><font color="#0000FF">public</font></b> <font color="#008080">ModelAndView</font> <b><font color="#000000">recalculateStatisticsForLnet</font></b><font color="#990000">(</font>@<b><font color="#000000">PathVariable</font></b><font color="#990000">(</font><font color="#FF0000">"param"</font><font color="#990000">)</font> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> param<font color="#990000">)</font> <font color="#FF0000">{</font>
+        <b><font color="#0000FF">final</font></b> <font color="#008080">ModelAndView</font> mv <font color="#990000">=</font> <b><font color="#0000FF">new</font></b> <b><font color="#000000">ModelAndView</font></b><font color="#990000">(</font><font color="#FF0000">"redirect:/jobs/all"</font><font color="#990000">);</font>
+        <font color="#008080">Map&lt;String, Object&gt;</font> model <font color="#990000">=</font> mv<font color="#990000">.</font><b><font color="#000000">getModel</font></b><font color="#990000">();</font>
+
+        <i><font color="#9A1900">// schedule next execution of echo job</font></i>
+        <font color="#008080">Trigger</font> runNowTrigger <font color="#990000">=</font> <b><font color="#000000">createTrigger</font></b><font color="#990000">(</font>echoJob<font color="#990000">,</font> param<font color="#990000">);</font>
+        <font color="#008080">JobKey</font> jobKey <font color="#990000">=</font> echoJob<font color="#990000">.</font><b><font color="#000000">getKey</font></b><font color="#990000">();</font>
+        <font color="#008080">String</font> jobName <font color="#990000">=</font> jobKey<font color="#990000">.</font><b><font color="#000000">getName</font></b><font color="#990000">();</font>
+        <font color="#008080">JobDataMap</font> jobDataMap <font color="#990000">=</font> runNowTrigger<font color="#990000">.</font><b><font color="#000000">getJobDataMap</font></b><font color="#990000">();</font> <i><font color="#9A1900">// <b>&lt;1&gt;</b></font></i>
+        jobDataMap<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font>EchoJob<font color="#990000">.</font>KEY_PARAM<font color="#990000">,</font> param<font color="#990000">);</font>
+        <b><font color="#0000FF">try</font></b> <font color="#FF0000">{</font>
+            <font color="#008080">Scheduler</font> scheduler <font color="#990000">=</font> schedulerFactory<font color="#990000">.</font><b><font color="#000000">getScheduler</font></b><font color="#990000">();</font>
+            scheduler<font color="#990000">.</font><b><font color="#000000">scheduleJob</font></b><font color="#990000">(</font>statisticCalculationRunNowTrigger<font color="#990000">);</font>
+            model<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font><font color="#FF0000">"message"</font><font color="#990000">,</font> <font color="#FF0000">"Calculation of statistics started for : "</font> <font color="#990000">+</font> param<font color="#990000">);</font>
+        <font color="#FF0000">}</font> <b><font color="#0000FF">catch</font></b> <font color="#990000">(</font>org<font color="#990000">.</font>quartz<font color="#990000">.</font><font color="#008080">ObjectAlreadyExistsException</font> e<font color="#990000">)</font> <font color="#FF0000">{</font> <i><font color="#9A1900">// <b>&lt;2&gt;</b></font></i>
+            model<font color="#990000">.</font><b><font color="#000000">put</font></b><font color="#990000">(</font><font color="#FF0000">"message"</font><font color="#990000">,</font> <font color="#FF0000">"Job already running for : "</font> <font color="#990000">+</font> param<font color="#990000">);</font>
+        <font color="#FF0000">}</font> <b><font color="#0000FF">catch</font></b> <font color="#990000">(</font><font color="#008080">Exception</font> e<font color="#990000">)</font> <font color="#FF0000">{</font>
+            <b><font color="#0000FF">throw</font></b> <b><font color="#0000FF">new</font></b> <b><font color="#000000">IllegalStateException</font></b><font color="#990000">(</font><font color="#FF0000">"Unable to schedule job "</font> <font color="#990000">+</font> jobName<font color="#990000">,</font> e<font color="#990000">);</font>
+        <font color="#FF0000">}</font>
+
+        <b><font color="#0000FF">return</font></b> mv<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    <b><font color="#0000FF">private</font></b> <font color="#008080">Trigger</font> <b><font color="#000000">createTrigger</font></b><font color="#990000">(</font><font color="#008080">JobDetail</font> jobDetail<font color="#990000">,</font> <font color="#008080">String</font> someparam<font color="#990000">)</font> <font color="#FF0000">{</font>
+        <font color="#008080">String</font> triggerId <font color="#990000">=</font> <font color="#FF0000">"my-echo-now-trigger-"</font> <font color="#990000">+</font> someparam<font color="#990000">;</font>
+        <font color="#008080">Trigger</font> trigger <font color="#990000">=</font> <b><font color="#000000">newTrigger</font></b><font color="#990000">()</font>
+                <font color="#990000">.</font><b><font color="#000000">withIdentity</font></b><font color="#990000">(</font>triggerId<font color="#990000">,</font> QuartzSchedulingConfiguration<font color="#990000">.</font>QUARTZ_DEFAULT_JOB_GROUP<font color="#990000">)</font>
+                <font color="#990000">.</font><b><font color="#000000">startNow</font></b><font color="#990000">()</font>
+                <font color="#990000">.</font><b><font color="#000000">forJob</font></b><font color="#990000">(</font>jobDetail<font color="#990000">)</font>
+                <font color="#990000">.</font><b><font color="#000000">build</font></b><font color="#990000">();</font>
+
+        <b><font color="#0000FF">return</font></b> trigger<font color="#990000">;</font>
+    <font color="#FF0000">}</font>
+
+    <i><font color="#9A1900">// .....</font></i>
+
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<ol>
+<li>
+<p>
+passing parameter to the job
+</p>
+</li>
+<li>
+<p>
+detecting already running job
+</p>
+</li>
+</ol>
+<p>This simple code shows how to run job on a single server in a cluster
+(we get <em>cluster wide singleton</em> job). It also shows us how to pass
+parameter to the job, and it allows us to detect if job is already
+running somewhere in the cluster.</p>
+<p>In order to use parameter in our job we may modify EchoJob:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt><b><font color="#000080">import</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>Job<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>JobExecutionContext<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>quartz<font color="#990000">.</font>JobExecutionException<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>slf4j<font color="#990000">.</font>Logger<font color="#990000">;</font>
+<b><font color="#000080">import</font></b> org<font color="#990000">.</font>slf4j<font color="#990000">.</font>LoggerFactory<font color="#990000">;</font>
+
+<b><font color="#0000FF">public</font></b> <b><font color="#0000FF">class</font></b> <font color="#008080">EchoService</font> <b><font color="#0000FF">implements</font></b> Job <font color="#FF0000">{</font>
+    <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">String</font> KEY_PARAM <font color="#990000">=</font> <font color="#FF0000">"param"</font><font color="#990000">;</font>
+
+    <b><font color="#0000FF">public</font></b> <b><font color="#0000FF">static</font></b> <b><font color="#0000FF">final</font></b> <font color="#008080">Logger</font> LOG <font color="#990000">=</font> LoggerFactory<font color="#990000">.</font><b><font color="#000000">getLogger</font></b><font color="#990000">(</font>EchoService<font color="#990000">.</font><b><font color="#0000FF">class</font></b><font color="#990000">);</font>
+
+    @Override
+    <b><font color="#0000FF">public</font></b> <font color="#009900">void</font> <b><font color="#000000">execute</font></b><font color="#990000">(</font><font color="#008080">JobExecutionContext</font> jobContext<font color="#990000">)</font> <b><font color="#0000FF">throws</font></b> JobExecutionException <font color="#FF0000">{</font>
+        <font color="#008080">String</font> param <font color="#990000">=</font> <font color="#990000">(</font>String<font color="#990000">)</font> context<font color="#990000">.</font><b><font color="#000000">get</font></b><font color="#990000">(</font>KEY_PARAM<font color="#990000">);</font> <i><font color="#9A1900">//<b>&lt;1&gt;</b></font></i>
+        LOG<font color="#990000">.</font><b><font color="#000000">error</font></b><font color="#990000">(</font><font color="#FF0000">"echo service invoked with param {}"</font><font color="#990000">,</font> param<font color="#990000">);</font>
+    <font color="#FF0000">}</font>
+
+<font color="#FF0000">}</font></tt></pre></td></tr></table>
+<ol>
+<li>
+<p>
+Fetch parameter from job context explicitly
+</p>
+</li>
+</ol>
+<table frame="void" cellpadding="4">
+<tr valign="top">
+<td>
+<img style="border-image: none 0;" alt="Note" src="data:image/png;base64,
+iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAJhUlEQVRoge2ZWWycVxXHf+fce7/v
+m/GaGCde4pI0aQlJC0kRtE1L00JbLIjY4QkeUB9YHhAIJFCExAsKUkE8IAFFPIDUIqhBRSDRBUqC
+CimFFBCBpCWx02IaZ3G2SdyxPZ7vHh6+mcnSZnFjKIge6Wj8zYzvPf9z/me5d8TM+F8WfbkNuFx5
+BcDLLf/fAEZGRmx4eNh6enqsp6fHhoeHbWRk5D9aFeSlVqHNmzfb6H33sHnT7ZQmD5GfOMax6Sm+
+Pl5h1Yc+xpYtW2SBbX1ReUkRGBkZsdH77mHLW95EOv4Ms3ueJh6YYPHUFF9aljJ63z3cf//9/5FI
+vKQIDA8P293L2yhVjjH7t51ocDiviFecF46n7XzBreChhx4qNhH5t0XjJUVgx44ddGUZ9b/vIpQD
+oRQIWSDJAiFL6B9axo4dO4gxAmANWVDLG+Ln82URMRGhVCqRHxonlAPqFXWKC4r6IhI6OMjMzBN4
+/4LlTUQQEZxzZ32QJAlpmrb+p16vU6vVOHXq1AWjN18AnDj0F971vrs4OnmYJVkoDA4FCPUO172I
+Cgnt7SV++4vvsGhRJx3tJbIsRVVpsUnOBBABBVFEClKYwbKr7sTM7EIUnBcA7z21k7t49x1X8JXv
+bOWra7rw5QRtcN8PLCfvvZJvb9vJycpJpg4/hp/N0I4SMQs4Jw0A5zBXHGiCaIZIKABgpGlKjPEF
+0TpT5pUDRXiVt99+Le03r+WzuytM1gO6pB/3+o0cbxvk8yOPMjW6i2iR2lxOjJDHSDMFogmGwzQ7
+rRJAUpAENAGXIZq2AFzQpvkACCEQcahP+cRH3sKHn9zHXU+MM7rtGeD33NDXzaZynZU9gcezpUw9
+X6OzIyOakkfF4QEpPG6nDRNNEA2FSgKimETSNCXPc0II57VpXhEolUqoOrxPSLOMT330Dv5SqfKD
+NR388Y2L+caQsjITNv3pMBs3rOT56ZyZGaM+J0QUxDc0INrWUgggoRGBAOIRAt77hY1AmqaoeJxP
+cN645jVDbNn8Hj73o8fZ/af9mEE9j9y2YRXt5YzZWmRmzjj1/BwhTXAKzitOHEbeWlc0AVwDnCv8
+KoZzjotV33lTSL1HNKAuEtKM1169jM98/E6mTk3x4Nbd7Bk7TEdHRvAeVY+hmDqmZwx1kIkiqrhz
+S2zL+AbNMC6l/80LgHMOEY9oQvBCks5RKpXo7JhFxbhz42pet2aQet1YtLiDJAkIDq8BHwJmwlwO
+UaD0ojsrNKuUReIZyb9gABCHcwWFgg+0lTPyvIRToVzKWLpkMfV6REQplYvmZCj1uuBUSdJwTg8A
+XBdoCZMOsBkQBeGi/J83gBgjmABC8AlJGsjzFLMyaXDM1etEA0VR50iCx6mSZhkiijpPjEpQD+SF
+4WdJrTAewdCFB1CtVlFVVATnhMQnWJqC5aTBk+c5IIgWRoTgSZJAmiZAo1s7hwsppglI+fTiljeY
+nyHkLQotKIAYI4igzpFHISQOiwEnKTEG8hhRVZw6YjRQLfJGHcF7jleqTBw8znXr12MABnv37efY
+iSnesG4tiUsRUQwD7JIAzKsPqCqiRbVwweM04XdPjhJN+dvTBxgbn6G9q59yZx9/3HWEb33vN+zc
+/RzOJ+w/eJLtO8Z5ZNtT7PvHIUQTvvv9X/Lc/mN0d3by3fseRLQwvWh0Fy+h8wbQ2VFG1KM+xfuA
+qufo8So/fejPPD/rqJys8pvf7eLAoeNMHqnw2U9+kH3jVQ5MClMzKUla5obr13HliiEMmDx6gltv
+uY7Vr1nBQF8PJopQ9AFTt/AROFfMjCW9XTy19xB33Hodb924jr1j+/nDk3/nzTdei4jw3nfeyCOP
+bufa1y5jzeoVrcHM8HR3dfHlr/2Q+x94jFtuuh44/9B2PplXDryYLF3STXd3e+t5UXcHY89OsOH6
+NS2Qed7wpM1Rm50G4MGHH2P961Zy3bqreXrPP5mrzwLt5y6/cACq1eoLCKm+TN/SAebmfn8aUG83
+PYs7+cnPH+eqKwd5as8/edc7bi02847pmVkATk1VWbF8AOcca1Yv59DkqcYK0tCL02deACqVCldc
+0YdIwLmEPM9RV6NnUZlPf3wT6oqJcePN6wHhzTeu4/CRCrfctJ4sSxBRli7pYfHEMUSU97/7Th75
+1RP8eec+Yp5zzTVXM9DfDyogBvHS6HTJACYmJnjVoq5GFw0454gCEOnoaMfiNGZFFRFxJGkbywZ6
+i1NWoy9kWYmbb1gHKCHApuGbisVFGyoYUswa5OR5ftF56JIBjI6OMtDfWwAQ35jnc8AVpRXBohVq
+UowECKqK4RBxoE0W6gvGCcEjaOEAwEQWdpgbGxujt7erOLO2mk3R8i0Wz9EiuUGz+qlKEQEUaJbI
+4lTHmTVePKgWzpDGJGpc8CDTlEsuo88++wxXDA0UIUbAOP23KGZKjI48KnkuhcbiPbPCOBoeBikO
+Lk2VxjqNRilaAEqSZGEAbN261bZt+zW33XY7IAXXm6Ou0YhIMamaaUOl5WRrzg00viuKWWxpQUOH
+NAZFQRpD48Xlkig0MTHBB95zG+VSylz1KCbWyDOh2XyK+56IqjWMKigkUnzWnPPFFFRRLZ29SQRU
+ELOGY4pZ6LKOlM07mZ07d/KOtw1TcB4sGkTDiDQ9K1IkrKeYmQC08d7pZLSiRBpE5s7aS0XAHFEK
+AGY51Wr18g80Zmb33nsvX/z8XdSmj2AWOXhwkrxe46+79jB55Dh/3T2GxUhHextdXW2sXN7PNWtW
+IQKDA71FFBoAjIgQkVg/a5+oHrU5zIznDhxk964xKpXKggAoTlWW8+OfPorlOQ//cjsDy1bS2dFO
+W+diVly1iL6+Pqanpzl5qsL4pPHwN3/G1InDlMsZ7Z1tDA30cfWqIa5dexV9fb2YnT7UTxw4xsHJ
+o4yOjfOP8QOMjx/k4OQx7r777lY0zycXvJ02M4sxMjg4SL1eR0TYsGEDw8PD9PX10d7ejogUN3a1
+GqpKCIE8z5mdnUVVqVarbN++nba2Nvbu3csDDzyAqrJ8+atb+zjn6e/vZ/Xq1axatYq1a9fS29tL
+lmUMDQ1RKpXOm9EXvV6v1+tWr9eZnp5mZmaGWq1GjLHF62aiNZ+bnPfe45xrvTZzxMyYmZk56+LX
+zKjX661DvHOOJElIkoRSqYT3/vLvRlW15eHCa4VxzdvmpjZDfubzuXeb3vuzqCEixBhbo0NTkyS5
+PAr9L8j/96+U/w3yCoCXW14B8HLLvwDd67nwZIEPdgAAAABJRU5ErkJggg==">
+</td>
+<td style="border-left: 1px solid silver;">From Quartz documentation: If you add setter methods to your job
+class that correspond to the names of keys in the JobDataMap (such as
+a setJobSays(String val) method for the data in the example above),
+then Quartz&#8217;s default JobFactory implementation will automatically
+call those setters when the job is instantiated, thus preventing the
+need to explicitly get the values out of the map within your execute
+method.</td></tr></table>
+<hr>
+<h2><a name="_warnings"></a>Warnings</h2>
+<p>If you have started long running jobs you might see following warning
+messages in logs:</p>
+<table border="0" bgcolor="#e8e8e8" width="100%" cellpadding="10"><tr><td><!-- Generator: GNU source-highlight 3.1.7
+by Lorenzo Bettini
+http://www.lorenzobettini.it
+http://www.gnu.org/software/src-highlite -->
+<pre><tt>[21.08.13. 04:11:44:626 CEST] 00000099 ThreadMonitor W   WSVR0605W: Thread "WorkManager.Admin_WM : 19" (000000ff) has been active for 704328 milliseconds and may be hung.  There is/are 3 thread(s) in total in the server that may be hung.
+        at ....
+        at org.quartz.core.JobRunShell.run(JobRunShell.java:207)
+        at org.springframework.scheduling.commonj.DelegatingWork.run(DelegatingWork.java:61)
+        at com.ibm.ws.asynchbeans.J2EEContext.run(J2EEContext.java:1178)
+        at com.ibm.ws.asynchbeans.WorkWithExecutionContextImpl.go(WorkWithExecutionContextImpl.java:199)
+        at com.ibm.ws.asynchbeans.CJWorkItemImpl.run(CJWorkItemImpl.java:236)
+        at com.ibm.ws.util.ThreadPool$Worker.run(ThreadPool.java:1783)
+[21.08.13. 06:28:57:285 CEST] 000000ff ThreadMonitor W   WSVR0606W: Thread "WorkManager.Admin_WM : 19" (000000ff) was previously reported to be hung but has completed.  It was active for approximately 12536878 milliseconds.  There is/are 2 thread(s) in total in the server that still may be hung.</tt></pre></td></tr></table>
+<p>This is normal behaviour, no threads are interrupted. Stacktrace is
+printed to ease debug if thread is really stuck. If everything is ok
+message WSVR0606W will be printed when thread finishes its work.</p>
+<p>See
+<a href="http://stackoverflow.com/questions/3810266/how-does-threadmonitor-work">http://stackoverflow.com/questions/3810266/how-does-threadmonitor-work</a>
+for more info. <em>com.ibm.websphere.threadmonitor.threshold</em> is the
+property you may want configure.</p>
+<hr>
+<h2><a name="_utilities"></a>Utilities</h2>
+<p>Here are some web apps you may find useful:</p>
+<ul>
+<li>
+<p>
+<a href="http://www.cronmaker.com/">CronMaker</a> helps you create valid cron
+  expressions
+</p>
+</li>
+<li>
+<p>
+<a href="http://www.onlineconversion.com/unix_time.htm">Unix time conversion
+  tool</a> - helps you create unix time value which can be used to
+  manually adjust NEXT_FIRE_TIME of a trigger.
+</p>
+</li>
+</ul>
+<hr>
+<h2><a name="_references"></a>References</h2>
+<ul>
+<li>
+<p>
+<a href="http://www.objectpartners.com/2013/07/09/configuring-quartz-2-with-spring-in-clustered-mode/">Configuring Quartz 2 with Spring in clustered mode</a>
+</p>
+</li>
+<li>
+<p>
+<a href="https://gist.github.com/jeffsheets/5862630">Gist: Configuring Quartz 2.1.7 with Spring 3.1.3 in clustered mode</a>
+</p>
+</li>
+<li>
+<p>
+<a href="https://gist.github.com/jelies/5085593">Gist: Quartz (2.1.6) java config with spring (3.2.1). Using a SpringBeanJobFactory to automatically autowire quartz classes.</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://forum.springsource.org/showthread.php?53160-Spring-s-Quartz-Integration-how-to-schedule-new-jobs-programmatically">Spring&#8217;s Quartz Integration: how to schedule new jobs programmatically</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://blog.btmatthews.com/?p=40">Inject application context dependencies in Quartz job beans</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://sloanseaman.com/wordpress/2011/06/06/spring-and-quartz-and-persistence/">Spring, Quartz, and Persistence</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://devtrigger.blogspot.com/2012/02/spring-31-with-quartz-212.html">Springframework 3.1 with quartz 2.1.2 </a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://stackoverflow.com/questions/175880/unmanaged-threads-spring-quartz-websphere-hibernate">Unmanaged Threads Spring Quartz Websphere Hibernate</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://jira.terracotta.org/jira/browse/QTZ-113">Quartz starts unmanaged threads and J2EE context is not propagated to the job threads</a>
+</p>
+</li>
+<li>
+<p>
+<a href="http://jira.terracotta.org/jira/browse/QTZ-194">Quartz starts unmanaged threads in JobStoreSupport</a>
+</p>
+</li>
+</ul>
+</div>

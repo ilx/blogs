@@ -1,0 +1,17 @@
+
+Java - off heap memory
+======================
+
+
+Resources
+---------
+
+- http://code.google.com/p/vanilla-java/[HugeCollections Library to support collections with millions and billions of elements.]
+- http://highlyscalable.wordpress.com/2012/02/02/direct-memory-access-in-java/[Tricks with Direct Memory Access in Java]
+- http://coders.talend.com/sites/default/files/heapoff-wtf_OlivierLamy.pdf[Off heap memory presentation by Olivier Lamy]
+- http://directmemory.apache.org/[Apache DirectMemory]
+- http://www.mapdb.org/[MapDB] - successor to JDBM
+- http://stackoverflow.com/questions/5574241/interesting-uses-of-sun-misc-unsafe[Interesting uses of sun.misc.Unsafe]
+- http://raffaeleguidi.wordpress.com/2011/01/12/directmemory-benchmark-heap-vs-off-heap-vs-orientdb/[DirectMemory Benchmark: Heap vs Off-heap vs OrientDB]
+- http://code.google.com/p/jmalloc/[Jmalloc]
+

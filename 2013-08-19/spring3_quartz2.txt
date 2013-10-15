@@ -544,7 +544,7 @@ References
   - http://jira.terracotta.org/jira/browse/QTZ-113[Quartz starts unmanaged threads and J2EE context is not propagated to the job threads]
   - http://jira.terracotta.org/jira/browse/QTZ-194[Quartz starts unmanaged threads in JobStoreSupport]
 
-
+- http://stackoverflow.com/questions/6788811/taskscheduler-scheduled-and-quartz/6840970#6840970[TaskScheduler, @Scheduled and quartz]
 
 
 

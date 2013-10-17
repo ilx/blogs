@@ -1,0 +1,18 @@
+Generate CXF web service using maven plugin
+===========================================
+
+
+
+Resources
+---------
+
+- http://cxf.apache.org/docs/using-cxf-with-maven.html[Using CXF with maven]
+- http://cxf.apache.org/docs/maven-cxf-codegen-plugin-wsdl-to-java.html[CXF Maven plugin which can generate java artifacts from WSDL]
+- http://cxf.apache.org/docs/wsdl-to-java.html[CXF WSDL to Java] 
+- http://cxf.apache.org/cxf-xjc-plugin.html[The CXF XJC Maven Plugin]
+- http://cxf.apache.org/xjc-utils.html[xjc utils]
+- http://confluence.highsource.org/display/J2B/Using+JAXB2+Basics+Plugins+with+CXF[Using JAXB2 Basics Plugins with CXF]
+- https://github.com/fmarot/xml-mapping-tutorial/wiki[Tutorial: CXF Webservice using Maven & an XML Catalog. ]
+- http://labs.bsb.com/2011/01/usage-of-an-xml-catalog-in-the-xmlbeans-cxf-integration/[Usage of an XML catalog in the XMLBeans-CXF integration]  
+
+

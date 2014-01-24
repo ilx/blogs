@@ -1,0 +1,13 @@
+Testing Spring MVC and Spring Security
+======================================
+
+Tips how to test spring controllers and spring security annotations:
+
+
+
+
+Resources
+---------
+
+- http://blog.jamesdbloom.com/UsingPropertySourceAndEnvironment.html
+- https://github.com/jamesdbloom/base_spring_mvc_web_application
